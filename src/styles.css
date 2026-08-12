@@ -92,7 +92,7 @@ svg {
 
 .titlebar {
   position: relative;
-  height: 58px;
+  height: 50px;
   padding: 0 12px 0 20px;
   display: flex;
   align-items: center;
@@ -128,6 +128,10 @@ svg {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+}
+
+.settings-button:disabled {
+  opacity: 0.42;
 }
 
 .settings-button span,
@@ -197,7 +201,7 @@ svg {
 }
 
 main {
-  height: calc(100% - 58px);
+  height: calc(100% - 50px);
   padding: clamp(38px, 7vh, 54px) clamp(40px, 7vw, 68px) 24px;
   display: flex;
   flex-direction: column;
@@ -332,17 +336,37 @@ h1 {
   object-fit: contain;
   image-rendering: auto;
   filter: brightness(0);
-  opacity: 0.64;
+  opacity: 0.79;
 }
 
 .app-icon.is-fallback {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
 }
 
 .app-icon .inline-icon,
 .app-icon svg {
   width: 21px;
   height: 21px;
+}
+
+.shortcut-card.icon-document .app-icon svg,
+.shortcut-card.icon-sheet .app-icon svg {
+  width: 34px;
+  height: 34px;
+  stroke-width: 1.35;
+}
+
+.shortcut-card.icon-document .app-icon {
+  background: color-mix(in srgb, var(--surface-raised) 91%, var(--accent-soft));
+}
+
+.shortcut-card.icon-sheet .app-icon {
+  background: color-mix(in srgb, var(--surface-raised) 93%, var(--body));
+}
+
+.shortcut-card.icon-sheet .sheet-accent {
+  stroke: var(--accent);
+  stroke-width: 2.2;
 }
 
 .shortcut-name {
@@ -458,7 +482,7 @@ h1 {
 }
 
 .sleeping-card .app-icon-image {
-  opacity: 0.34;
+  opacity: 0.46;
 }
 
 .sleeping-card .app-icon {
@@ -996,7 +1020,10 @@ h1 {
 }
 
 .settings-list {
+  max-height: calc(100vh - 110px);
   padding-top: 14px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .setting-item {
@@ -1183,6 +1210,345 @@ h1 {
   font-size: 11px;
 }
 
+.startup-panel {
+  margin: 10px 8px 4px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--background);
+}
+
+.startup-toggle {
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.startup-toggle:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.startup-toggle > span:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.startup-toggle strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.startup-toggle small {
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.setting-switch {
+  width: 34px;
+  height: 20px;
+  padding: 3px;
+  display: block;
+  flex: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.setting-switch-knob {
+  width: 12px;
+  height: 12px;
+  display: block;
+  border-radius: 50%;
+  background: var(--faint);
+  transition: background 160ms ease, transform 190ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.startup-toggle[aria-pressed="true"] .setting-switch {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.startup-toggle[aria-pressed="true"] .setting-switch-knob {
+  background: var(--accent);
+  transform: translateX(14px);
+}
+
+.welcome-backdrop {
+  position: fixed;
+  inset: 50px 0 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: color-mix(in srgb, var(--background) 76%, transparent);
+  backdrop-filter: blur(9px);
+}
+
+.welcome-backdrop[hidden] {
+  display: none;
+}
+
+.welcome-card {
+  width: min(470px, 100%);
+  padding: 38px 40px 34px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface-raised);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--text) 11%, transparent);
+  opacity: 0;
+  text-align: center;
+  transform: translateY(10px) scale(0.985);
+  transition: opacity 320ms ease, transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.welcome-card.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.welcome-mark {
+  width: 38px;
+  height: 38px;
+  margin: 0 auto 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--accent);
+}
+
+.welcome-mark svg {
+  width: 19px;
+  height: 19px;
+}
+
+.welcome-kicker {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+}
+
+.welcome-card h2 {
+  margin: 14px 0 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 25px;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+}
+
+.welcome-card p {
+  max-width: 340px;
+  margin: 14px auto 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.welcome-actions {
+  margin-top: 28px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.welcome-actions .primary-button,
+.welcome-actions .secondary-button {
+  min-width: 126px;
+}
+
+.guide-view {
+  position: fixed;
+  inset: 50px 0 0;
+  z-index: 30;
+  background: var(--background);
+  visibility: hidden;
+  opacity: 0;
+  clip-path: circle(0 at 50% 48%);
+  transform: scale(0.985);
+  transition: clip-path 820ms cubic-bezier(0.22, 1, 0.36, 1), opacity 320ms ease, transform 820ms cubic-bezier(0.22, 1, 0.36, 1), visibility 820ms;
+}
+
+.guide-view.is-open {
+  visibility: visible;
+  opacity: 1;
+  clip-path: circle(145% at 50% 48%);
+  transform: scale(1);
+}
+
+.guide-scroll {
+  height: 100%;
+  padding: 38px clamp(44px, 8vw, 92px) 54px;
+  overflow-y: auto;
+}
+
+.guide-header {
+  max-width: 680px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.guide-back-button {
+  margin: 0 auto 34px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.guide-back-button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.guide-back-button span:first-child,
+.guide-back-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.guide-header h2 {
+  margin-top: 0;
+  font-size: clamp(32px, 5vw, 48px);
+  letter-spacing: -0.04em;
+}
+
+.guide-header p {
+  max-width: 520px;
+  margin: 15px auto 0;
+  color: var(--body);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.guide-content {
+  max-width: 720px;
+  margin: 54px auto 0;
+  border-top: 1px solid var(--border);
+}
+
+.guide-block {
+  padding: 27px 4px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 19px;
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-number {
+  padding-top: 4px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.guide-block h3 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 19px;
+  font-weight: 400;
+}
+
+.guide-block p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.85;
+}
+
+.guide-block em {
+  font-family: Georgia, serif;
+}
+
+.guide-signature {
+  max-width: 720px;
+  margin: 48px auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--footer-ink);
+}
+
+.guide-signature-line {
+  width: 64px;
+  height: 1px;
+  margin-bottom: 20px;
+  background: var(--border-strong);
+}
+
+.guide-signature-word {
+  min-height: 42px;
+  display: flex;
+  align-items: baseline;
+  font-family: "Segoe Script", "Brush Script MT", "Snell Roundhand", cursive;
+  font-size: 30px;
+  font-style: italic;
+  letter-spacing: -0.09em;
+}
+
+.guide-signature-word span {
+  opacity: 0;
+  filter: blur(2px);
+  transform: translate(-3px, 2px);
+}
+
+.guide-view.is-open .guide-signature-word span {
+  animation: write-letter 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.guide-view.is-open .guide-signature-word span:nth-child(1) { animation-delay: 700ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(2) { animation-delay: 970ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(3) { animation-delay: 1240ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(4) { animation-delay: 1510ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(5) { animation-delay: 1780ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(6) { animation-delay: 2050ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(7) { animation-delay: 2320ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(8) { animation-delay: 2590ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(9) { animation-delay: 2860ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(10) { animation-delay: 3130ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(11) { animation-delay: 3400ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(12) { animation-delay: 3670ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(13) { animation-delay: 3940ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(14) { animation-delay: 4210ms; }
+.guide-view.is-open .guide-signature-word span:nth-child(15) { animation-delay: 4480ms; }
+
+@keyframes write-letter {
+  to {
+    opacity: 0.9;
+    filter: blur(0);
+    transform: translate(0, 0);
+  }
+}
+
+.guide-signature small {
+  margin-top: 8px;
+  color: var(--faint);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
 @media (max-width: 780px) {
   main {
     padding-inline: 34px;
@@ -1213,11 +1579,11 @@ h1 {
 @media (prefers-color-scheme: dark) {
   .app-icon-image {
     filter: none;
-    opacity: 0.68;
+    opacity: 0.82;
   }
 
   .sleeping-card .app-icon-image {
-    opacity: 0.34;
+    opacity: 0.46;
   }
 }
 
@@ -1232,7 +1598,11 @@ h1 {
   .signature-editor,
   .signature-editor-inner,
   .sleep-switch,
-  .sleep-switch > span {
+  .sleep-switch > span,
+  .setting-switch,
+  .setting-switch-knob,
+  .welcome-card,
+  .guide-view {
     transition: none;
   }
 
@@ -1244,5 +1614,12 @@ h1 {
 
   .handwritten-name {
     fill-opacity: 0.88;
+  }
+
+  .guide-signature-word span {
+    animation: none !important;
+    opacity: 0.9;
+    filter: none;
+    transform: none;
   }
 }

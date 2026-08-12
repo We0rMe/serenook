@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager};
 use windows::{
     core::{PCWSTR, PWSTR},
     Win32::{
-        Foundation::CloseHandle,
+        Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
         Graphics::Gdi::{
             CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
             BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
@@ -25,6 +25,11 @@ use windows::{
             Diagnostics::ToolHelp::{
                 CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
                 TH32CS_SNAPPROCESS,
+            },
+            Registry::{
+                RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
+                RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE,
+                REG_OPTION_NON_VOLATILE, REG_SZ,
             },
             Threading::{
                 OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -41,8 +46,12 @@ use windows::{
 const MAX_SHORTCUTS: usize = 40;
 const MAX_SIGNATURE_CHARACTERS: usize = 48;
 const DEFAULT_SIGNATURE: &str = "慢一点，也是在向前。";
-const ALLOWED_EXTENSIONS: [&str; 5] = ["exe", "lnk", "bat", "cmd", "url"];
-const ALLOWED_ICONS: [&str; 5] = ["app", "chat", "code", "compass", "folder"];
+const ALLOWED_EXTENSIONS: [&str; 8] = ["exe", "lnk", "bat", "cmd", "url", "txt", "csv", "xlsx"];
+const ALLOWED_ICONS: [&str; 7] = [
+    "app", "chat", "code", "compass", "folder", "document", "sheet",
+];
+const STARTUP_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const STARTUP_VALUE_NAME: &str = "Serenook";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -69,12 +78,22 @@ struct AppShortcut {
 #[serde(rename_all = "camelCase")]
 struct AppSettings {
     signature: String,
+    #[serde(default)]
+    launch_on_startup: bool,
+    #[serde(default = "existing_user_has_completed_welcome")]
+    has_completed_welcome: bool,
+}
+
+fn existing_user_has_completed_welcome() -> bool {
+    true
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             signature: DEFAULT_SIGNATURE.into(),
+            launch_on_startup: false,
+            has_completed_welcome: false,
         }
     }
 }
@@ -96,6 +115,85 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(config_directory(app)?.join("settings.json"))
 }
 
+fn wide_string(value: &OsStr) -> Vec<u16> {
+    value.encode_wide().chain(std::iter::once(0)).collect()
+}
+
+fn startup_registry_key(
+    access: windows::Win32::System::Registry::REG_SAM_FLAGS,
+) -> Result<HKEY, String> {
+    let subkey = wide_string(OsStr::new(STARTUP_KEY));
+    let mut key = HKEY::default();
+    let status = unsafe {
+        if access == KEY_SET_VALUE {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                PCWSTR(subkey.as_ptr()),
+                None,
+                PCWSTR::null(),
+                REG_OPTION_NON_VOLATILE,
+                access,
+                None,
+                &mut key,
+                None,
+            )
+        } else {
+            RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                PCWSTR(subkey.as_ptr()),
+                None,
+                access,
+                &mut key,
+            )
+        }
+    };
+    if status != ERROR_SUCCESS {
+        return Err(format!("无法访问开机启动设置：Windows 错误 {}。", status.0));
+    }
+    Ok(key)
+}
+
+fn is_launch_on_startup_enabled() -> Result<bool, String> {
+    let key = match startup_registry_key(KEY_QUERY_VALUE) {
+        Ok(key) => key,
+        Err(_) => return Ok(false),
+    };
+    let name = wide_string(OsStr::new(STARTUP_VALUE_NAME));
+    let status = unsafe { RegQueryValueExW(key, PCWSTR(name.as_ptr()), None, None, None, None) };
+    let _ = unsafe { RegCloseKey(key) };
+    Ok(status == ERROR_SUCCESS)
+}
+
+fn set_launch_on_startup(enabled: bool) -> Result<(), String> {
+    let key = startup_registry_key(KEY_SET_VALUE)?;
+    let name = wide_string(OsStr::new(STARTUP_VALUE_NAME));
+    let status = if enabled {
+        let executable =
+            env::current_exe().map_err(|error| format!("无法确定 Serenook 位置：{error}"))?;
+        let command = format!(r#""{}""#, executable.display());
+        let wide_command = wide_string(OsStr::new(&command));
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                wide_command.as_ptr().cast::<u8>(),
+                wide_command.len() * std::mem::size_of::<u16>(),
+            )
+        };
+        unsafe { RegSetValueExW(key, PCWSTR(name.as_ptr()), None, REG_SZ, Some(bytes)) }
+    } else {
+        let result = unsafe { RegDeleteValueW(key, PCWSTR(name.as_ptr())) };
+        if result == ERROR_FILE_NOT_FOUND {
+            ERROR_SUCCESS
+        } else {
+            result
+        }
+    };
+    let _ = unsafe { RegCloseKey(key) };
+    if status != ERROR_SUCCESS {
+        return Err(format!("无法更新开机启动设置：Windows 错误 {}。", status.0));
+    }
+    Ok(())
+}
+
 fn validate_target(target: &str, require_exists: bool) -> Result<PathBuf, String> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
@@ -114,7 +212,7 @@ fn validate_target(target: &str, require_exists: bool) -> Result<PathBuf, String
         .ok_or_else(|| "无法识别该文件类型。".to_string())?;
 
     if !ALLOWED_EXTENSIONS.contains(&extension.as_str()) {
-        return Err("仅支持 .exe、.lnk、.bat、.cmd 和 .url 文件。".into());
+        return Err("仅支持 .exe、.lnk、.bat、.cmd、.url、.txt、.csv 和 .xlsx 文件。".into());
     }
 
     if require_exists && !path.is_file() {
@@ -540,12 +638,18 @@ fn save_apps(app: AppHandle, shortcuts: Vec<AppShortcut>) -> Result<(), String> 
 fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
     let path = settings_path(&app)?;
     if !path.exists() {
-        return Ok(AppSettings::default());
+        let mut settings = AppSettings::default();
+        settings.launch_on_startup = is_launch_on_startup_enabled()?;
+        return Ok(settings);
     }
 
     let content = fs::read_to_string(path).map_err(|error| format!("无法读取设置：{error}"))?;
-    let settings: AppSettings =
+    let mut settings: AppSettings =
         serde_json::from_str(&content).map_err(|error| format!("设置格式无效：{error}"))?;
+    settings.launch_on_startup = is_launch_on_startup_enabled()?;
+    if settings.launch_on_startup {
+        set_launch_on_startup(true)?;
+    }
     validate_settings(&settings)?;
     Ok(settings)
 }
@@ -554,6 +658,7 @@ fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
 fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<(), String> {
     settings.signature = settings.signature.trim().to_string();
     validate_settings(&settings)?;
+    set_launch_on_startup(settings.launch_on_startup)?;
     let content = serde_json::to_string_pretty(&settings)
         .map_err(|error| format!("无法整理设置：{error}"))?;
     fs::write(settings_path(&app)?, content).map_err(|error| format!("无法保存设置：{error}"))
@@ -602,7 +707,7 @@ fn main() {
             launch_app
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run JuvenileScholar");
+        .expect("failed to run Serenook");
 }
 
 #[cfg(test)]
@@ -624,12 +729,15 @@ mod tests {
     fn accepts_supported_absolute_paths() {
         assert!(validate_target(r"C:\Tools\Example.exe", false).is_ok());
         assert!(validate_target(r"D:\Links\Example.lnk", false).is_ok());
+        assert!(validate_target(r"D:\Notes\Example.txt", false).is_ok());
+        assert!(validate_target(r"D:\Notes\Example.csv", false).is_ok());
+        assert!(validate_target(r"D:\Notes\Example.xlsx", false).is_ok());
     }
 
     #[test]
     fn rejects_relative_or_unsupported_paths() {
         assert!(validate_target(r"Tools\Example.exe", false).is_err());
-        assert!(validate_target(r"C:\Tools\Example.txt", false).is_err());
+        assert!(validate_target(r"C:\Tools\Example.pdf", false).is_err());
     }
 
     #[test]
@@ -669,9 +777,18 @@ mod tests {
     fn validates_custom_signature() {
         assert!(validate_settings(&AppSettings::default()).is_ok());
         assert!(validate_settings(&AppSettings {
-            signature: " ".into()
+            signature: " ".into(),
+            launch_on_startup: false,
+            has_completed_welcome: false,
         })
         .is_err());
+    }
+
+    #[test]
+    fn defaults_legacy_settings_to_no_startup() {
+        let settings: AppSettings = serde_json::from_str(r#"{"signature":"慢一点。"}"#).unwrap();
+        assert!(!settings.launch_on_startup);
+        assert!(settings.has_completed_welcome);
     }
 
     #[test]

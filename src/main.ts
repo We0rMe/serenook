@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./styles.css";
 
-type IconName = "app" | "chat" | "code" | "compass" | "folder";
+type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet";
 type ShortcutKind = "local" | "web";
 
 interface AppShortcut {
@@ -17,11 +17,14 @@ interface AppShortcut {
 
 interface AppSettings {
   signature: string;
+  launchOnStartup: boolean;
+  hasCompletedWelcome: boolean;
 }
 
 const DEFAULT_SIGNATURE = "慢一点，也是在向前。";
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
+const GREETING_BOUNDARY_HOURS = [6, 11, 14, 18, 24];
 
 const ICONS: Record<string, string> = {
   app: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>',
@@ -42,9 +45,16 @@ const ICONS: Record<string, string> = {
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>',
   signature: '<svg viewBox="0 0 24 24"><path d="M4 17c3-6 5-9 7-9 3 0-1 8 2 8 2 0 3-4 5-4 1.5 0 .3 4 2 4"/><path d="M4 20h16"/></svg>',
   layers: '<svg viewBox="0 0 24 24"><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 16l8 4 8-4"/></svg>',
+  document: '<svg class="document-icon" viewBox="0 0 32 32"><path d="M8 3.5h10l6 6V28H8V3.5Z"/><path d="M18 3.5V10h6"/><path d="M12 15h8M12 19h8M12 23h5"/></svg>',
+  sheet: '<svg class="sheet-icon" viewBox="0 0 32 32"><rect x="5.5" y="4.5" width="21" height="23" rx="2"/><path d="M5.5 11.5h21M12.5 11.5v16M19.5 11.5v16M5.5 18.5h21M5.5 23h21"/><path class="sheet-accent" d="M8.5 8h15"/></svg>',
+  book: '<svg viewBox="0 0 24 24"><path d="M4 5.5c3.2-.8 5.8-.2 8 1.7v12c-2.2-1.9-4.8-2.5-8-1.7v-12Z"/><path d="M20 5.5c-3.2-.8-5.8-.2-8 1.7v12c2.2-1.9 4.8-2.5 8-1.7v-12Z"/></svg>',
+  arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></svg>',
+  back: '<svg viewBox="0 0 24 24"><path d="M19 12H5M10 7l-5 5 5 5"/></svg>',
+  startup: '<svg viewBox="0 0 24 24"><path d="M12 3v9M8.5 6.2A7.5 7.5 0 1 0 15.5 6"/></svg>',
 };
 
 const appWindow = getCurrentWindow();
+const mainView = document.querySelector<HTMLElement>("main")!;
 const pageTitle = element<HTMLElement>("page-title");
 const shortcutGrid = element<HTMLElement>("shortcut-grid");
 const emptyState = element<HTMLElement>("empty-state");
@@ -86,9 +96,19 @@ const bulkSettingButton = element<HTMLButtonElement>("bulk-setting-button");
 const bulkEditor = element<HTMLElement>("bulk-editor");
 const sleepAllButton = element<HTMLButtonElement>("sleep-all-button");
 const wakeAllButton = element<HTMLButtonElement>("wake-all-button");
+const guideSettingButton = element<HTMLButtonElement>("guide-setting-button");
+const guideView = element<HTMLElement>("guide-view");
+const guideBackButton = element<HTMLButtonElement>("guide-back-button");
+const startupSettingButton = element<HTMLButtonElement>("startup-setting-button");
+const startupEditor = element<HTMLElement>("startup-editor");
+const startupToggle = element<HTMLButtonElement>("startup-toggle");
+const welcomeBackdrop = element<HTMLElement>("welcome-backdrop");
+const welcomeCard = element<HTMLElement>("welcome-card");
+const welcomeSkipButton = element<HTMLButtonElement>("welcome-skip-button");
+const welcomeReadButton = element<HTMLButtonElement>("welcome-read-button");
 
 let shortcuts: AppShortcut[] = [];
-let settings: AppSettings = { signature: DEFAULT_SIGNATURE };
+let settings: AppSettings = { signature: DEFAULT_SIGNATURE, launchOnStartup: false, hasCompletedWelcome: false };
 const appIcons = new Map<string, string | null>();
 const runningTargets = new Set<string>();
 let editing = false;
@@ -98,7 +118,9 @@ let newShortcutSleeping = false;
 let runningDetectionPending = true;
 let runningDetectionInFlight = false;
 let runningPollTimer: number | undefined;
+let greetingTimer: number | undefined;
 let toastTimer: number | undefined;
+let welcomeOpen = false;
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);
@@ -151,7 +173,7 @@ function setTargetMode(kind: ShortcutKind, clearTarget = false): void {
   targetLabel.textContent = isWeb ? "网址" : "程序位置";
   targetHint.textContent = isWeb
     ? "请输入以 http:// 或 https:// 开头的完整网址"
-    : "支持 .exe、.lnk、.bat、.cmd 和 .url 文件";
+    : "支持应用、快捷方式以及 .txt、.csv、.xlsx 文档";
 }
 
 function updateGreeting(now = new Date()): void {
@@ -177,6 +199,20 @@ function updateGreeting(now = new Date()): void {
   pageTitle.textContent = greeting;
 }
 
+function scheduleGreetingUpdate(now = new Date()): void {
+  updateGreeting(now);
+  window.clearTimeout(greetingTimer);
+  const nextBoundary = new Date(now);
+  const nextHour = GREETING_BOUNDARY_HOURS.find((hour) => hour > now.getHours()) ?? 24;
+  if (nextHour === 24) {
+    nextBoundary.setDate(nextBoundary.getDate() + 1);
+    nextBoundary.setHours(0, 0, 0, 0);
+  } else {
+    nextBoundary.setHours(nextHour, 0, 0, 0);
+  }
+  greetingTimer = window.setTimeout(() => scheduleGreetingUpdate(), nextBoundary.getTime() - now.getTime() + 1_000);
+}
+
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -184,6 +220,8 @@ function delay(milliseconds: number): Promise<void> {
 function inferIcon(name: string, target: string, kind: ShortcutKind): IconName {
   if (kind === "web") return "compass";
   const value = `${name} ${target}`.toLowerCase();
+  if (/\.(csv|xlsx)$/i.test(target)) return "sheet";
+  if (/\.txt$/i.test(target)) return "document";
   if (/(wechat|微信|qq|telegram|slack|teams)/.test(value)) return "chat";
   if (/(code|studio|idea|pycharm|webstorm|dev)/.test(value)) return "code";
   if (/(chrome|edge|firefox|browser|浏览器)/.test(value)) return "compass";
@@ -225,7 +263,8 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
 
   const iconHolder = document.createElement("span");
   iconHolder.className = "app-icon";
-  const iconData = appIcons.get(iconCacheKey(shortcut));
+  const usesBuiltInDocumentIcon = shortcut.icon === "document" || shortcut.icon === "sheet";
+  const iconData = usesBuiltInDocumentIcon ? null : appIcons.get(iconCacheKey(shortcut));
   if (iconData) {
     const image = document.createElement("img");
     image.className = "app-icon-image";
@@ -400,6 +439,7 @@ async function refreshRunningApps(initial = false): Promise<void> {
 async function hydrateAppIcons(items: AppShortcut[]): Promise<void> {
   const keys = new Set<string>();
   const pending = items.filter((shortcut) => {
+    if (shortcut.icon === "document" || shortcut.icon === "sheet") return false;
     const key = iconCacheKey(shortcut);
     if (appIcons.has(key) || keys.has(key)) return false;
     keys.add(key);
@@ -481,14 +521,14 @@ async function chooseTarget(): Promise<void> {
   const selected = await open({
     multiple: false,
     directory: false,
-    filters: [{ name: "Windows 应用", extensions: ["exe", "lnk", "bat", "cmd", "url"] }],
+    filters: [{ name: "应用与文档", extensions: ["exe", "lnk", "bat", "cmd", "url", "txt", "csv", "xlsx"] }],
   });
   if (typeof selected !== "string") return;
 
   targetInput.value = selected;
   if (!nameInput.value.trim()) {
     const filename = selected.split(/[\\/]/).pop() ?? "新应用";
-    nameInput.value = filename.replace(/\.(exe|lnk|bat|cmd|url)$/i, "");
+    nameInput.value = filename.replace(/\.(exe|lnk|bat|cmd|url|txt|csv|xlsx)$/i, "");
   }
   formError.hidden = true;
 }
@@ -604,12 +644,19 @@ function closeSettings(): void {
   settingsBackdrop.hidden = true;
   setSettingsEditor(signatureSettingButton, signatureEditor, false);
   setSettingsEditor(bulkSettingButton, bulkEditor, false);
+  setSettingsEditor(startupSettingButton, startupEditor, false);
   settingsButton.focus();
+}
+
+function closeOtherSettingsEditors(except: "signature" | "bulk" | "startup"): void {
+  if (except !== "signature") setSettingsEditor(signatureSettingButton, signatureEditor, false);
+  if (except !== "bulk") setSettingsEditor(bulkSettingButton, bulkEditor, false);
+  if (except !== "startup") setSettingsEditor(startupSettingButton, startupEditor, false);
 }
 
 function toggleSignatureEditor(): void {
   const opening = !signatureEditor.classList.contains("is-open");
-  setSettingsEditor(bulkSettingButton, bulkEditor, false);
+  closeOtherSettingsEditors("signature");
   setSettingsEditor(signatureSettingButton, signatureEditor, opening);
   signatureError.hidden = true;
   if (opening) {
@@ -623,12 +670,107 @@ function toggleSignatureEditor(): void {
 
 function toggleBulkEditor(): void {
   const opening = !bulkEditor.classList.contains("is-open");
-  setSettingsEditor(signatureSettingButton, signatureEditor, false);
+  closeOtherSettingsEditors("bulk");
   setSettingsEditor(bulkSettingButton, bulkEditor, opening);
   if (opening) {
     const firstAction = sleepAllButton.disabled ? wakeAllButton : sleepAllButton;
     window.setTimeout(() => firstAction.focus(), 0);
   }
+}
+
+function toggleStartupEditor(): void {
+  const opening = !startupEditor.classList.contains("is-open");
+  closeOtherSettingsEditors("startup");
+  setSettingsEditor(startupSettingButton, startupEditor, opening);
+  if (opening) window.setTimeout(() => startupToggle.focus(), 0);
+}
+
+function renderStartupSetting(): void {
+  startupToggle.setAttribute("aria-pressed", String(settings.launchOnStartup));
+}
+
+async function toggleStartup(): Promise<void> {
+  const previous = settings;
+  settings = { ...settings, launchOnStartup: !settings.launchOnStartup };
+  renderStartupSetting();
+  startupToggle.disabled = true;
+  try {
+    await invoke("save_settings", { settings });
+    showToast(settings.launchOnStartup ? "已开启开机自启" : "已关闭开机自启");
+  } catch (error) {
+    settings = previous;
+    renderStartupSetting();
+    showToast(errorMessage(error), true);
+  } finally {
+    startupToggle.disabled = false;
+  }
+}
+
+function openGuide(): void {
+  closeSettings();
+  mainView.inert = true;
+  settingsButton.disabled = true;
+  guideView.inert = false;
+  guideView.setAttribute("aria-hidden", "false");
+  guideView.classList.remove("is-closing");
+  document.body.classList.add("guide-open");
+  window.setTimeout(() => {
+    guideView.classList.add("is-open");
+    guideBackButton.focus();
+  }, 20);
+}
+
+function closeGuide(): void {
+  guideView.classList.add("is-closing");
+  guideView.classList.remove("is-open");
+  window.setTimeout(() => {
+    guideView.classList.remove("is-closing");
+    guideView.setAttribute("aria-hidden", "true");
+    guideView.inert = true;
+    mainView.inert = false;
+    settingsButton.disabled = false;
+    document.body.classList.remove("guide-open");
+    settingsButton.focus();
+  }, 820);
+}
+
+function completeWelcome(readGuide: boolean): void {
+  if (!welcomeOpen) return;
+  welcomeOpen = false;
+  welcomeCard.classList.remove("is-open");
+  window.setTimeout(() => {
+    welcomeCard.setAttribute("aria-hidden", "true");
+    welcomeCard.inert = true;
+    welcomeBackdrop.hidden = true;
+    mainView.inert = false;
+    settingsButton.disabled = false;
+    welcomeSkipButton.disabled = false;
+    welcomeReadButton.disabled = false;
+    if (readGuide) openGuide();
+    else editButton.focus();
+  }, 360);
+}
+
+async function openWelcomeOnce(): Promise<void> {
+  const previous = settings;
+  settings = { ...settings, hasCompletedWelcome: true };
+  try {
+    await invoke("save_settings", { settings });
+  } catch (error) {
+    settings = previous;
+    showToast(errorMessage(error), true);
+  }
+
+  welcomeOpen = true;
+  welcomeBackdrop.hidden = false;
+  welcomeCard.inert = false;
+  welcomeCard.setAttribute("aria-hidden", "false");
+  mainView.inert = true;
+  settingsButton.disabled = true;
+  window.setTimeout(() => {
+    welcomeCard.classList.add("is-open");
+    welcomeReadButton.focus();
+  }, 30);
 }
 
 async function setAllSleeping(sleeping: boolean): Promise<void> {
@@ -659,7 +801,7 @@ async function saveSignature(): Promise<void> {
   }
 
   const previous = settings;
-  settings = { signature };
+  settings = { ...settings, signature };
   signatureText.textContent = signature;
   try {
     await invoke("save_settings", { settings });
@@ -675,7 +817,7 @@ async function saveSignature(): Promise<void> {
 
 async function initialize(): Promise<void> {
   hydrateStaticIcons();
-  updateGreeting();
+  scheduleGreetingUpdate();
   const [appsResult, settingsResult] = await Promise.allSettled([
     invoke<AppShortcut[]>("load_apps"),
     invoke<AppSettings>("load_settings"),
@@ -688,6 +830,8 @@ async function initialize(): Promise<void> {
   else showToast(errorMessage(settingsResult.reason), true);
 
   render();
+  renderStartupSetting();
+  if (!settings.hasCompletedWelcome) await openWelcomeOnce();
   void hydrateAppIcons(shortcuts);
   await refreshRunningApps(true);
   runningPollTimer = window.setInterval(() => void refreshRunningApps(), RUNNING_POLL_INTERVAL_MS);
@@ -707,6 +851,12 @@ settingsCloseButton.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
 signatureSettingButton.addEventListener("click", toggleSignatureEditor);
 bulkSettingButton.addEventListener("click", toggleBulkEditor);
+guideSettingButton.addEventListener("click", () => openGuide());
+guideBackButton.addEventListener("click", closeGuide);
+welcomeSkipButton.addEventListener("click", () => completeWelcome(false));
+welcomeReadButton.addEventListener("click", () => completeWelcome(true));
+startupSettingButton.addEventListener("click", toggleStartupEditor);
+startupToggle.addEventListener("click", () => void toggleStartup());
 sleepAllButton.addEventListener("click", () => void setAllSleeping(true));
 wakeAllButton.addEventListener("click", () => void setAllSleeping(false));
 element<HTMLButtonElement>("signature-cancel-button").addEventListener("click", toggleSignatureEditor);
@@ -728,9 +878,15 @@ form.addEventListener("submit", (event) => {
   void saveFromForm();
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && settingsPanel.classList.contains("is-open")) closeSettings();
+  if (event.key === "Escape" && welcomeOpen) completeWelcome(false);
+  else if (event.key === "Escape" && settingsPanel.classList.contains("is-open")) closeSettings();
+  else if (event.key === "Escape" && guideView.classList.contains("is-open")) closeGuide();
 });
-window.addEventListener("beforeunload", () => window.clearInterval(runningPollTimer));
+window.addEventListener("focus", () => scheduleGreetingUpdate());
+window.addEventListener("beforeunload", () => {
+  window.clearInterval(runningPollTimer);
+  window.clearTimeout(greetingTimer);
+});
 element<HTMLButtonElement>("minimize-button").addEventListener("click", () => void appWindow.minimize());
 element<HTMLButtonElement>("maximize-button").addEventListener("click", () => void appWindow.toggleMaximize());
 element<HTMLButtonElement>("close-button").addEventListener("click", () => void appWindow.close());
