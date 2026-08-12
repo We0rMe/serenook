@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "JuvenileScholar",
-  "version": "0.6.1",
+  "productName": "Serenook",
+  "version": "0.8.0",
   "identifier": "com.juvenilescholar.launcher",
   "build": {
     "beforeDevCommand": "C:\\Users\\86178\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\vite\\bin\\vite.js",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "JuvenileScholar",
+        "title": "Serenook",
         "width": 920,
         "height": 640,
         "minWidth": 700,

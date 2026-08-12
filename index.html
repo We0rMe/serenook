@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#faf9f5" />
-    <title>JuvenileScholar</title>
+    <title>Serenook</title>
   </head>
   <body>
     <div id="app-shell">
@@ -15,7 +15,7 @@
           </button>
         </div>
 
-        <span class="titlebar-kicker" data-tauri-drag-region>YOUR QUIET SPACE</span>
+        <span class="titlebar-kicker" data-tauri-drag-region>SERENE NOOK</span>
 
         <div class="titlebar-actions">
           <button id="minimize-button" class="window-button" type="button" aria-label="最小化">
@@ -70,7 +70,7 @@
         </section>
 
         <footer class="footer-note">
-          <svg class="footer-drawing" viewBox="0 0 190 92" role="img" aria-label="一本打开的书、一株新芽和 JuvenileScholar 手写字样">
+          <svg class="footer-drawing" viewBox="0 0 190 92" role="img" aria-label="一本打开的书、一株新芽和 JuvenileScholar 手写署名">
             <path class="draw-line line-1" pathLength="1" d="M12 43c24-5 44-3 73 7 28-10 49-12 82-7" />
             <path class="draw-line line-2" pathLength="1" d="M18 17c21-2 42 6 67 27V13C61 1 38 2 18 8v35Z" />
             <path class="draw-line line-3" pathLength="1" d="M152 17c-21-2-42 6-67 27V13c24-12 47-11 67-5v35Z" />
@@ -85,11 +85,24 @@
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+      <div id="welcome-backdrop" class="welcome-backdrop" hidden>
+        <section id="welcome-card" class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-copy" aria-hidden="true" inert>
+          <span class="welcome-mark" data-icon="book" aria-hidden="true"></span>
+          <span class="welcome-kicker">WELCOME TO SERENOOK</span>
+          <h2 id="welcome-title">初次见面，愿这里恰好安静。</h2>
+          <p id="welcome-copy">花一点时间读完使用说明，会更快熟悉这处小小的工作角落。</p>
+          <div class="welcome-actions">
+            <button id="welcome-skip-button" class="secondary-button" type="button">暂时跳过</button>
+            <button id="welcome-read-button" class="primary-button" type="button">阅读使用说明</button>
+          </div>
+        </section>
+      </div>
+
       <div id="settings-backdrop" class="settings-backdrop" hidden></div>
       <aside id="settings-panel" class="settings-panel" aria-hidden="true" aria-labelledby="settings-title">
         <header class="settings-heading">
           <div>
-            <span class="settings-kicker">JUVENILESCHOLAR</span>
+            <span class="settings-kicker">SERENOOK</span>
             <h2 id="settings-title">设置</h2>
           </div>
           <button id="settings-close-button" class="dialog-close-button" type="button" aria-label="关闭设置">
@@ -140,8 +153,90 @@
               </div>
             </div>
           </div>
+          <button id="guide-setting-button" class="setting-item" type="button">
+            <span class="setting-item-icon" data-icon="book" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>使用说明</strong>
+              <small>从相识结交，到熟悉默契</small>
+            </span>
+            <span class="setting-item-chevron" data-icon="arrow" aria-hidden="true"></span>
+          </button>
+          <button id="startup-setting-button" class="setting-item" type="button" aria-expanded="false">
+            <span class="setting-item-icon" data-icon="startup" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>开机自启</strong>
+              <small>随 Windows 安静地醒来</small>
+            </span>
+            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="startup-editor" class="signature-editor" aria-hidden="true" inert>
+            <div class="signature-editor-inner">
+              <div class="startup-panel">
+                <button id="startup-toggle" class="startup-toggle" type="button" aria-pressed="false">
+                  <span>
+                    <strong>随电脑启动</strong>
+                    <small>登录 Windows 后自动打开 Serenook</small>
+                  </span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
+
+      <section id="guide-view" class="guide-view" aria-hidden="true" inert aria-labelledby="guide-title">
+        <div class="guide-scroll">
+          <header class="guide-header">
+            <button id="guide-back-button" class="guide-back-button" type="button">
+              <span data-icon="back" aria-hidden="true"></span>
+              <span>返回工作台</span>
+            </button>
+            <h2 id="guide-title">你好，这里是 Serenook。</h2>
+            <p>让常用入口停靠在一处，也让每一次开始少一点寻找，多一点从容。</p>
+          </header>
+
+          <div class="guide-content">
+            <article class="guide-block guide-intro-block">
+              <span class="guide-number">01</span>
+              <div>
+                <h3>一处安静的小角落</h3>
+                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。它不试图接管你的工作，只将应用、网页和文档轻轻收在一起，在需要时，为你打开通往下一件事的门。</p>
+              </div>
+            </article>
+
+            <article class="guide-block">
+              <span class="guide-number">02</span>
+              <div>
+                <h3>放入与打开</h3>
+                <p>进入“编辑”，添加本地应用、在线网址或常用文档。轻点卡片即可打开；“全开”会避开睡眠中与已经运行的应用，并依次启动其余入口。</p>
+              </div>
+            </article>
+
+            <article class="guide-block">
+              <span class="guide-number">03</span>
+              <div>
+                <h3>睡眠与苏醒</h3>
+                <p>暂时不需要的入口可以进入睡眠区。它们仍被妥善保存，却不会参与“全开”。需要时，再让它们苏醒。</p>
+              </div>
+            </article>
+
+            <article class="guide-block">
+              <span class="guide-number">04</span>
+              <div>
+                <h3>慢慢熟悉彼此</h3>
+                <p>你可以修改签名、选择是否随电脑启动，也可以随使用习惯逐步整理入口。Serenook 的理想状态，是安静地待在一旁，却越来越懂得你的节奏。</p>
+              </div>
+            </article>
+          </div>
+
+          <footer class="guide-signature" aria-label="JuvenileScholar 手写署名">
+            <span class="guide-signature-line" aria-hidden="true"></span>
+            <span class="guide-signature-word" aria-hidden="true"><span>J</span><span>u</span><span>v</span><span>e</span><span>n</span><span>i</span><span>l</span><span>e</span><span>S</span><span>c</span><span>h</span><span>o</span><span>l</span><span>a</span><span>r</span></span>
+            <small>愿每一次开始，都更轻一点。</small>
+          </footer>
+        </div>
+      </section>
     </div>
 
     <dialog id="shortcut-dialog" class="shortcut-dialog">
@@ -178,7 +273,7 @@
           <input id="shortcut-target" type="text" readonly autocomplete="off" required />
           <button id="browse-button" class="secondary-button" type="button">浏览…</button>
         </div>
-        <p id="target-hint" class="field-hint">支持 .exe、.lnk、.bat、.cmd 和 .url 文件</p>
+        <p id="target-hint" class="field-hint">支持应用、快捷方式与常用文档</p>
 
         <p id="form-error" class="form-error" role="alert" hidden></p>
 
