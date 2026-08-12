@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#faf9f5" />
+    <title>JuvenileScholar</title>
+  </head>
+  <body>
+    <div id="app-shell">
+      <header class="titlebar" data-tauri-drag-region>
+        <div class="identity" data-tauri-drag-region>
+          <button id="settings-button" class="settings-button" type="button" aria-label="打开设置" aria-expanded="false">
+            <span data-icon="settings" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <span class="titlebar-kicker" data-tauri-drag-region>YOUR QUIET SPACE</span>
+
+        <div class="titlebar-actions">
+          <button id="minimize-button" class="window-button" type="button" aria-label="最小化">
+            <span data-icon="minus" aria-hidden="true"></span>
+          </button>
+          <button id="maximize-button" class="window-button" type="button" aria-label="最大化或还原">
+            <span data-icon="maximize" aria-hidden="true"></span>
+          </button>
+          <button id="close-button" class="window-button close-button" type="button" aria-label="关闭">
+            <span data-icon="close" aria-hidden="true"></span>
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <div class="intro-copy">
+            <h1 id="page-title">今天，想从哪里开始？</h1>
+          </div>
+          <div class="intro-actions">
+            <button id="launch-all-button" class="launch-all-button" type="button" hidden>
+              <span class="button-icon" data-icon="play" aria-hidden="true"></span>
+              <span id="launch-all-label">全开</span>
+            </button>
+            <button id="edit-button" class="edit-button" type="button" aria-pressed="false">
+              <span class="button-icon" data-icon="edit" aria-hidden="true"></span>
+              <span class="edit-label">编辑</span>
+            </button>
+          </div>
+        </section>
+
+        <section id="shortcut-grid" class="shortcut-grid" aria-label="应用快捷启动"></section>
+
+        <section id="empty-state" class="empty-state" hidden>
+          <span class="empty-icon" data-icon="sparkles" aria-hidden="true"></span>
+          <p>这里还很安静，放入第一个常用应用吧。</p>
+          <button id="empty-add-button" class="primary-button" type="button">添加应用</button>
+        </section>
+
+        <section id="sleep-section" class="sleep-section" hidden aria-labelledby="sleep-section-title">
+          <button id="sleep-toggle" class="sleep-toggle" type="button" aria-expanded="false">
+            <span class="sleep-toggle-icon" data-icon="moon" aria-hidden="true"></span>
+            <span id="sleep-section-title">睡眠区</span>
+            <span id="sleep-count" class="sleep-count">0</span>
+            <span class="sleep-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="sleep-content" class="sleep-content" aria-hidden="true" inert>
+            <div class="sleep-content-inner">
+              <div id="sleep-grid" class="shortcut-grid sleep-grid" aria-label="睡眠中的应用"></div>
+            </div>
+          </div>
+        </section>
+
+        <footer class="footer-note">
+          <svg class="footer-drawing" viewBox="0 0 190 92" role="img" aria-label="一本打开的书、一株新芽和 JuvenileScholar 手写字样">
+            <path class="draw-line line-1" pathLength="1" d="M12 43c24-5 44-3 73 7 28-10 49-12 82-7" />
+            <path class="draw-line line-2" pathLength="1" d="M18 17c21-2 42 6 67 27V13C61 1 38 2 18 8v35Z" />
+            <path class="draw-line line-3" pathLength="1" d="M152 17c-21-2-42 6-67 27V13c24-12 47-11 67-5v35Z" />
+            <path class="draw-line line-4" pathLength="1" d="M85 44c-2-11 2-20 9-27" />
+            <path class="draw-line line-5" pathLength="1" d="M94 17c4-9 12-10 17-8-1 8-7 13-17 8Z" />
+            <text class="handwritten-name" x="18" y="78">JuvenileScholar</text>
+            <path class="draw-line name-flourish" pathLength="1" d="M38 84c35 4 74 4 116-2" />
+          </svg>
+          <span id="signature-text">慢一点，也是在向前。</span>
+        </footer>
+      </main>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+      <div id="settings-backdrop" class="settings-backdrop" hidden></div>
+      <aside id="settings-panel" class="settings-panel" aria-hidden="true" aria-labelledby="settings-title">
+        <header class="settings-heading">
+          <div>
+            <span class="settings-kicker">JUVENILESCHOLAR</span>
+            <h2 id="settings-title">设置</h2>
+          </div>
+          <button id="settings-close-button" class="dialog-close-button" type="button" aria-label="关闭设置">
+            <span data-icon="close" aria-hidden="true"></span>
+          </button>
+        </header>
+        <div class="settings-list">
+          <button id="signature-setting-button" class="setting-item" type="button" aria-expanded="false">
+            <span class="setting-item-icon" data-icon="signature" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>自定义签名</strong>
+              <small>修改工作台右下角的文字</small>
+            </span>
+            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="signature-editor" class="signature-editor" aria-hidden="true" inert>
+            <div class="signature-editor-inner">
+              <form id="signature-form" class="signature-form">
+                <label for="signature-input">签名内容</label>
+                <input id="signature-input" type="text" maxlength="48" autocomplete="off" />
+                <p id="signature-error" class="form-error" role="alert" hidden></p>
+                <div class="signature-actions">
+                  <button id="signature-cancel-button" class="secondary-button" type="button">取消</button>
+                  <button class="primary-button" type="submit">保存</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <button id="bulk-setting-button" class="setting-item" type="button" aria-expanded="false">
+            <span class="setting-item-icon" data-icon="layers" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>一键操作</strong>
+              <small>一键睡眠、一键苏醒</small>
+            </span>
+            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="bulk-editor" class="signature-editor bulk-editor" aria-hidden="true" inert>
+            <div class="signature-editor-inner">
+              <div class="bulk-action-panel">
+                <button id="sleep-all-button" class="bulk-action-button" type="button">
+                  <span data-icon="moon" aria-hidden="true"></span>
+                  <span>全部睡眠</span>
+                </button>
+                <button id="wake-all-button" class="bulk-action-button" type="button">
+                  <span data-icon="sun" aria-hidden="true"></span>
+                  <span>全部苏醒</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <dialog id="shortcut-dialog" class="shortcut-dialog">
+      <form id="shortcut-form" method="dialog" novalidate>
+        <header class="dialog-heading">
+          <div>
+            <span class="dialog-kicker">SHORTCUT</span>
+            <h2 id="dialog-title">添加一个应用</h2>
+          </div>
+          <button id="dialog-close-button" class="dialog-close-button" type="button" aria-label="关闭">
+            <span data-icon="close" aria-hidden="true"></span>
+          </button>
+        </header>
+
+        <input id="shortcut-id" type="hidden" />
+
+        <fieldset class="shortcut-kind-selector">
+          <legend>类型</legend>
+          <label class="kind-option">
+            <input type="radio" name="shortcut-kind" value="local" checked />
+            <span>本地应用</span>
+          </label>
+          <label class="kind-option">
+            <input type="radio" name="shortcut-kind" value="web" />
+            <span>在线网址</span>
+          </label>
+        </fieldset>
+
+        <label for="shortcut-name">名称</label>
+        <input id="shortcut-name" type="text" maxlength="64" autocomplete="off" required />
+
+        <label id="shortcut-target-label" for="shortcut-target">程序位置</label>
+        <div id="target-row" class="path-row">
+          <input id="shortcut-target" type="text" readonly autocomplete="off" required />
+          <button id="browse-button" class="secondary-button" type="button">浏览…</button>
+        </div>
+        <p id="target-hint" class="field-hint">支持 .exe、.lnk、.bat、.cmd 和 .url 文件</p>
+
+        <p id="form-error" class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-actions">
+          <button id="sleep-button" class="sleep-button" type="button" hidden>
+            <span data-icon="moon" aria-hidden="true"></span>
+            <span id="sleep-button-label">睡眠</span>
+            <span class="sleep-switch" aria-hidden="true"><span></span></span>
+          </button>
+          <button id="delete-button" class="delete-button" type="button" hidden>移除</button>
+          <span class="dialog-spacer"></span>
+          <button id="cancel-button" class="secondary-button" type="button">取消</button>
+          <button class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

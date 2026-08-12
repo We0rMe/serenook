@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "JuvenileScholar",
+  "version": "0.6.1",
+  "identifier": "com.juvenilescholar.launcher",
+  "build": {
+    "beforeDevCommand": "C:\\Users\\86178\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\vite\\bin\\vite.js",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "C:\\Users\\86178\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\typescript\\bin\\tsc && C:\\Users\\86178\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\vite\\bin\\vite.js build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "JuvenileScholar",
+        "width": 920,
+        "height": 640,
+        "minWidth": 700,
+        "minHeight": 540,
+        "center": true,
+        "decorations": false,
+        "resizable": true,
+        "shadow": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: asset: http://asset.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "useLocalToolsDir": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+.pnpm/
+dist/
+target/
+.tmp/
+src-tauri/gen/
+*.log
+
