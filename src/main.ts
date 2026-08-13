@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import "./styles.css";
 
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet";
@@ -25,6 +27,7 @@ const DEFAULT_SIGNATURE = "慢一点，也是在向前。";
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
 const GREETING_BOUNDARY_HOURS = [6, 11, 14, 18, 24];
+const FILE_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path d="M9.25 12h5.5M9.25 15.5h4"/></svg>';
 
 const ICONS: Record<string, string> = {
   app: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>',
@@ -45,8 +48,8 @@ const ICONS: Record<string, string> = {
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>',
   signature: '<svg viewBox="0 0 24 24"><path d="M4 17c3-6 5-9 7-9 3 0-1 8 2 8 2 0 3-4 5-4 1.5 0 .3 4 2 4"/><path d="M4 20h16"/></svg>',
   layers: '<svg viewBox="0 0 24 24"><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 16l8 4 8-4"/></svg>',
-  document: '<svg class="document-icon" viewBox="0 0 32 32"><path d="M8 3.5h10l6 6V28H8V3.5Z"/><path d="M18 3.5V10h6"/><path d="M12 15h8M12 19h8M12 23h5"/></svg>',
-  sheet: '<svg class="sheet-icon" viewBox="0 0 32 32"><rect x="5.5" y="4.5" width="21" height="23" rx="2"/><path d="M5.5 11.5h21M12.5 11.5v16M19.5 11.5v16M5.5 18.5h21M5.5 23h21"/><path class="sheet-accent" d="M8.5 8h15"/></svg>',
+  document: FILE_ICON_SVG,
+  sheet: FILE_ICON_SVG,
   book: '<svg viewBox="0 0 24 24"><path d="M4 5.5c3.2-.8 5.8-.2 8 1.7v12c-2.2-1.9-4.8-2.5-8-1.7v-12Z"/><path d="M20 5.5c-3.2-.8-5.8-.2-8 1.7v12c2.2-1.9 4.8-2.5 8-1.7v-12Z"/></svg>',
   arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></svg>',
   back: '<svg viewBox="0 0 24 24"><path d="M19 12H5M10 7l-5 5 5 5"/></svg>',
@@ -106,6 +109,12 @@ const welcomeBackdrop = element<HTMLElement>("welcome-backdrop");
 const welcomeCard = element<HTMLElement>("welcome-card");
 const welcomeSkipButton = element<HTMLButtonElement>("welcome-skip-button");
 const welcomeReadButton = element<HTMLButtonElement>("welcome-read-button");
+const updateDialog = element<HTMLDialogElement>("update-dialog");
+const updateVersion = element<HTMLElement>("update-version");
+const updateNotes = element<HTMLElement>("update-notes");
+const updateStatus = element<HTMLElement>("update-status");
+const updateLaterButton = element<HTMLButtonElement>("update-later-button");
+const updateInstallButton = element<HTMLButtonElement>("update-install-button");
 
 let shortcuts: AppShortcut[] = [];
 let settings: AppSettings = { signature: DEFAULT_SIGNATURE, launchOnStartup: false, hasCompletedWelcome: false };
@@ -121,6 +130,8 @@ let runningPollTimer: number | undefined;
 let greetingTimer: number | undefined;
 let toastTimer: number | undefined;
 let welcomeOpen = false;
+let availableUpdate: Update | null = null;
+let updateCheckStarted = false;
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);
@@ -184,7 +195,7 @@ function updateGreeting(now = new Date()): void {
     "周三好，已经走到一周中间。",
     "周四好，再向前一点。",
     "周五快乐！",
-    "周末好，做一点想做的事。",
+    "周六好，做一点想做的事。",
   ];
   const hour = now.getHours();
   const greeting = hour < 6
@@ -229,6 +240,15 @@ function inferIcon(name: string, target: string, kind: ShortcutKind): IconName {
   return "app";
 }
 
+function fileTypeMarker(shortcut: AppShortcut): "TXT" | "CSV" | "XLSX" | null {
+  if (shortcutKind(shortcut) !== "local") return null;
+  const extension = shortcut.target.match(/\.([^.\\/]+)$/)?.[1]?.toLowerCase();
+  if (extension === "txt") return "TXT";
+  if (extension === "csv") return "CSV";
+  if (extension === "xlsx") return "XLSX";
+  return null;
+}
+
 function showToast(message: string, isError = false): void {
   toast.textContent = message;
   toast.classList.toggle("is-error", isError);
@@ -244,6 +264,7 @@ function errorMessage(error: unknown): string {
 function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   const card = document.createElement("button");
   const kind = shortcutKind(shortcut);
+  const fileMarker = fileTypeMarker(shortcut);
   const running = isShortcutRunning(shortcut);
   card.type = "button";
   card.className = `shortcut-card icon-${shortcut.icon}`;
@@ -263,9 +284,12 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
 
   const iconHolder = document.createElement("span");
   iconHolder.className = "app-icon";
-  const usesBuiltInDocumentIcon = shortcut.icon === "document" || shortcut.icon === "sheet";
-  const iconData = usesBuiltInDocumentIcon ? null : appIcons.get(iconCacheKey(shortcut));
-  if (iconData) {
+  const usesBuiltInFileIcon = fileMarker !== null || shortcut.icon === "document" || shortcut.icon === "sheet";
+  const iconData = usesBuiltInFileIcon ? null : appIcons.get(iconCacheKey(shortcut));
+  if (usesBuiltInFileIcon) {
+    iconHolder.classList.add("is-file-icon");
+    iconHolder.innerHTML = FILE_ICON_SVG;
+  } else if (iconData) {
     const image = document.createElement("img");
     image.className = "app-icon-image";
     image.src = iconData;
@@ -286,6 +310,14 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
     const marker = document.createElement("span");
     marker.className = "online-marker";
     marker.textContent = "WEB";
+    marker.setAttribute("aria-hidden", "true");
+    card.append(marker);
+  }
+
+  if (fileMarker) {
+    const marker = document.createElement("span");
+    marker.className = "online-marker file-marker";
+    marker.textContent = fileMarker;
     marker.setAttribute("aria-hidden", "true");
     card.append(marker);
   }
@@ -773,6 +805,58 @@ async function openWelcomeOnce(): Promise<void> {
   }, 30);
 }
 
+async function checkForUpdates(): Promise<void> {
+  if (updateCheckStarted) return;
+  updateCheckStarted = true;
+  try {
+    const update = await check({ timeout: 12_000 });
+    if (!update) return;
+    availableUpdate = update;
+    updateVersion.textContent = `Serenook ${update.version}`;
+    updateNotes.textContent = update.body?.trim() || "这一版带来了一些安静而细小的改进。";
+    updateStatus.textContent = "准备好时，可以在这里完成更新。";
+    updateInstallButton.disabled = false;
+    updateLaterButton.disabled = false;
+    updateDialog.showModal();
+  } catch (error) {
+    console.info("Update check unavailable", error);
+  }
+}
+
+function closeUpdateDialog(): void {
+  if (updateInstallButton.disabled) return;
+  updateDialog.close();
+}
+
+async function installAvailableUpdate(): Promise<void> {
+  if (!availableUpdate) return;
+  updateInstallButton.disabled = true;
+  updateLaterButton.disabled = true;
+  let downloaded = 0;
+  let contentLength = 0;
+  try {
+    await availableUpdate.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        contentLength = event.data.contentLength ?? 0;
+        updateStatus.textContent = "正在安静地准备更新…";
+      } else if (event.event === "Progress") {
+        downloaded += event.data.chunkLength;
+        if (contentLength > 0) {
+          const progress = Math.min(100, Math.round((downloaded / contentLength) * 100));
+          updateStatus.textContent = `正在下载 ${progress}%`;
+        }
+      } else if (event.event === "Finished") {
+        updateStatus.textContent = "更新已经就绪，正在重新打开 Serenook…";
+      }
+    });
+    await relaunch();
+  } catch (error) {
+    updateStatus.textContent = `暂时未能完成更新：${errorMessage(error)}`;
+    updateInstallButton.disabled = false;
+    updateLaterButton.disabled = false;
+  }
+}
+
 async function setAllSleeping(sleeping: boolean): Promise<void> {
   const changed = shortcuts.some((shortcut) => shortcut.sleeping !== sleeping);
   if (!changed) return;
@@ -835,6 +919,7 @@ async function initialize(): Promise<void> {
   void hydrateAppIcons(shortcuts);
   await refreshRunningApps(true);
   runningPollTimer = window.setInterval(() => void refreshRunningApps(), RUNNING_POLL_INTERVAL_MS);
+  if (!welcomeOpen) window.setTimeout(() => void checkForUpdates(), 4_000);
 }
 
 editButton.addEventListener("click", () => {
@@ -855,6 +940,14 @@ guideSettingButton.addEventListener("click", () => openGuide());
 guideBackButton.addEventListener("click", closeGuide);
 welcomeSkipButton.addEventListener("click", () => completeWelcome(false));
 welcomeReadButton.addEventListener("click", () => completeWelcome(true));
+welcomeCard.addEventListener("transitionend", () => {
+  if (!welcomeOpen && !updateCheckStarted) window.setTimeout(() => void checkForUpdates(), 1_000);
+});
+updateLaterButton.addEventListener("click", closeUpdateDialog);
+updateInstallButton.addEventListener("click", () => void installAvailableUpdate());
+updateDialog.addEventListener("cancel", (event) => {
+  if (updateInstallButton.disabled) event.preventDefault();
+});
 startupSettingButton.addEventListener("click", toggleStartupEditor);
 startupToggle.addEventListener("click", () => void toggleStartup());
 sleepAllButton.addEventListener("click", () => void setAllSleeping(true));

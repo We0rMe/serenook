@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Serenook",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "identifier": "com.juvenilescholar.launcher",
   "build": {
-    "beforeDevCommand": "C:\\Users\\86178\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\vite\\bin\\vite.js",
+    "beforeDevCommand": null,
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "C:\\Users\\86178\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\typescript\\bin\\tsc && C:\\Users\\86178\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe node_modules\\vite\\bin\\vite.js build",
+    "beforeBuildCommand": null,
     "frontendDist": "../dist"
   },
   "app": {
@@ -30,6 +30,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis"],
     "useLocalToolsDir": true,
     "icon": [
@@ -38,5 +39,16 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZCNTQ3QkE3NTQzOTY5Q0MKUldUTWFUbFVwM3RVKzllcVBKSk5wYWV3SzBGVHFrenVBL0VJbXRhYzhCdDNtK01Odld5QnJrQnUK",
+      "endpoints": [
+        "https://github.com/We0rMe/serenook/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

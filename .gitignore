@@ -6,3 +6,29 @@ target/
 src-tauri/gen/
 *.log
 
+# Local development paths and caches
+.cargo/config.toml
+.npmrc
+.env
+.env.*
+!.env.example
+
+# Updater signing keys and local release metadata
+*.key
+*.key.pub
+*.pem
+*.pfx
+*.p12
+*.sig
+latest.json
+release-notes.local.md
+
+# Local Serenook user data
+settings.json
+shortcuts.json
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

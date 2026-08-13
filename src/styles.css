@@ -349,24 +349,20 @@ h1 {
   height: 21px;
 }
 
-.shortcut-card.icon-document .app-icon svg,
-.shortcut-card.icon-sheet .app-icon svg {
-  width: 34px;
-  height: 34px;
-  stroke-width: 1.35;
-}
-
-.shortcut-card.icon-document .app-icon {
+.app-icon.is-file-icon {
+  position: relative;
   background: color-mix(in srgb, var(--surface-raised) 91%, var(--accent-soft));
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
 }
 
-.shortcut-card.icon-sheet .app-icon {
-  background: color-mix(in srgb, var(--surface-raised) 93%, var(--body));
-}
-
-.shortcut-card.icon-sheet .sheet-accent {
-  stroke: var(--accent);
-  stroke-width: 2.2;
+.app-icon.is-file-icon > .file-icon-glyph {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  stroke-width: 1.35;
+  transform: translate(-50%, -50%);
 }
 
 .shortcut-name {
@@ -423,6 +419,11 @@ h1 {
   font-weight: 700;
   letter-spacing: 0.12em;
   line-height: 1;
+}
+
+.file-marker {
+  text-align: center;
+  letter-spacing: 0.09em;
 }
 
 .shortcut-card.has-corner .online-marker {
@@ -1367,6 +1368,65 @@ h1 {
 .welcome-actions .primary-button,
 .welcome-actions .secondary-button {
   min-width: 126px;
+}
+
+.update-dialog {
+  width: min(470px, calc(100vw - 40px));
+  padding: 0;
+}
+
+.update-card {
+  padding: 38px 40px 34px;
+  text-align: center;
+}
+
+.update-mark {
+  width: 38px;
+  height: 38px;
+  margin: 0 auto 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--accent);
+}
+
+.update-mark svg {
+  width: 19px;
+  height: 19px;
+}
+
+.update-card h2 {
+  margin: 14px 0 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 25px;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+}
+
+.update-version {
+  margin-top: 15px;
+  display: block;
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.update-notes {
+  max-height: 128px;
+  margin: 13px 0 0;
+  overflow-y: auto;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.75;
+  white-space: pre-line;
+}
+
+.update-status {
+  min-height: 18px;
+  margin: 13px 0 0;
+  color: var(--faint);
+  font-size: 10px;
 }
 
 .guide-view {

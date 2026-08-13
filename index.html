@@ -291,6 +291,21 @@
       </form>
     </dialog>
 
+    <dialog id="update-dialog" class="shortcut-dialog update-dialog">
+      <section class="update-card" aria-labelledby="update-title">
+        <span class="update-mark" data-icon="sparkles" aria-hidden="true"></span>
+        <span class="dialog-kicker">A SMALL RENEWAL</span>
+        <h2 id="update-title">有一个新版本，正在等你。</h2>
+        <strong id="update-version" class="update-version"></strong>
+        <p id="update-notes" class="update-notes"></p>
+        <p id="update-status" class="update-status" role="status" aria-live="polite"></p>
+        <div class="welcome-actions">
+          <button id="update-later-button" class="secondary-button" type="button">稍后再说</button>
+          <button id="update-install-button" class="primary-button" type="button">现在更新</button>
+        </div>
+      </section>
+    </dialog>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
