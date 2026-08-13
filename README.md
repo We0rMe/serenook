@@ -14,7 +14,6 @@
 - 在线网址统一使用本机 Microsoft Edge 的线稿图标与低对比度标记
 - 以 650 毫秒间隔依次启动当前工作台中的全部入口，避免瞬间并发
 - 每 10 秒按完整路径轻量检测本地 `.exe` 运行状态，已运行应用不再重复启动
-- 运行中的本地 `.exe` 卡片会按同一检测周期显示动态 CPU 占用率；网址与文档不参与采样
 - 首次运行状态检测期间锁定“全开”，关闭工作台后不保留后台检测
 - 可将暂时不用的应用移入默认折叠的睡眠区，并随时苏醒
 - 新增入口可通过独立睡眠开关决定保存到打开区或睡眠区
@@ -39,8 +38,7 @@
 - 将 WebView2 子进程全部计入时，本次启动峰值工作集约 `366 MB`，私有内存约 `224 MB`。
 - 本次采样共包含 1 个 Serenook 主进程与 6 个 WebView2 子进程；关闭 Serenook 两秒后，相关 WebView2 子进程为 0。
 - 当前安装包约 `3.1 MB`，主程序约 `12.7 MB`；应用运行依赖 Windows 已安装的 Microsoft Edge WebView2 Runtime。
-- CPU 在完成启动与运行状态检查后基本保持空闲；本次连续采样中主进程累计 CPU 时间稳定在约 `0.05` 秒。
-- 日常运行建议预留约 `500 MB` 可用内存与单个空闲 CPU 核心。批量打开的其他应用不属于 Serenook 自身占用，并会以 650 毫秒间隔依次启动。
+- 日常运行建议预留约 `500 MB` 可用内存。批量打开的其他应用不属于 Serenook 自身占用，并会以 650 毫秒间隔依次启动。
 
 这里的“峰值”是本次实测峰值，但不覆盖所有机器的硬性上限。
 
@@ -66,4 +64,4 @@
 
 ## 参考
 
-- [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md) — Apple、Claude 等产品设计语言的 Markdown 资料集合，为 Serenook 的视觉探索提供参考。
+- [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md) — 各大主流产品、应用、网页（如：Apple、Claude等）设计语言的 Markdown 资料集合，为 Serenook 的视觉探索提供参考。

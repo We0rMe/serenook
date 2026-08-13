@@ -28,7 +28,15 @@ interface AppSettings {
 const DEFAULT_SIGNATURE = "慢一点，也是在向前。";
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
-const GREETING_BOUNDARY_HOURS = [6, 11, 14, 18, 24];
+const GREETING_BOUNDARIES = [
+  { hour: 6, minute: 0 },
+  { hour: 9, minute: 30 },
+  { hour: 11, minute: 30 },
+  { hour: 13, minute: 30 },
+  { hour: 17, minute: 30 },
+  { hour: 20, minute: 30 },
+  { hour: 24, minute: 0 },
+];
 const FILE_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path d="M9.25 12h5.5M9.25 15.5h4"/></svg>';
 const SHEET_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path class="sheet-grid" d="M9 11h6v6H9zM9 14h6M12 11v6"/></svg>';
 
@@ -200,7 +208,7 @@ function setTargetMode(kind: ShortcutKind, clearTarget = false): void {
 
 function updateGreeting(now = new Date()): void {
   const weekdayGreetings = [
-    "周日好，留一点从容。",
+    "周日安好，宜感受自然。",
     "新的一周，稳稳开始。",
     "周二好，沿着节奏继续。",
     "周三好，已经走到一周中间。",
@@ -208,16 +216,20 @@ function updateGreeting(now = new Date()): void {
     "周五快乐！",
     "周六好，做一点想做的事。",
   ];
-  const hour = now.getHours();
-  const greeting = hour < 6
-    ? "夜深了，先照顾好自己。"
-    : hour < 11
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const greeting = minutes < 6 * 60
+    ? "夜深了，让今天轻轻落下。"
+    : minutes < 9 * 60 + 30
       ? weekdayGreetings[now.getDay()]
-      : hour < 14
-        ? "中午好，短暂小憩再行动吧～"
-        : hour < 18
-          ? "下午好，继续做点什么？"
-          : "晚上好，安静地完成一件事。";
+      : minutes < 11 * 60 + 30
+        ? "上午好，拾起一件小事。"
+        : minutes < 13 * 60 + 30
+          ? "中午好，宜小憩~"
+          : minutes < 17 * 60 + 30
+            ? "下午好，安静地继续。"
+            : minutes < 20 * 60 + 30
+              ? "傍晚好，把余光留给从容。"
+              : "晚上好，做完便好好休息。";
   pageTitle.textContent = greeting;
 }
 
@@ -225,12 +237,14 @@ function scheduleGreetingUpdate(now = new Date()): void {
   updateGreeting(now);
   window.clearTimeout(greetingTimer);
   const nextBoundary = new Date(now);
-  const nextHour = GREETING_BOUNDARY_HOURS.find((hour) => hour > now.getHours()) ?? 24;
-  if (nextHour === 24) {
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const next = GREETING_BOUNDARIES.find(({ hour, minute }) => hour * 60 + minute > currentMinutes)
+    ?? GREETING_BOUNDARIES[GREETING_BOUNDARIES.length - 1];
+  if (next.hour === 24) {
     nextBoundary.setDate(nextBoundary.getDate() + 1);
     nextBoundary.setHours(0, 0, 0, 0);
   } else {
-    nextBoundary.setHours(nextHour, 0, 0, 0);
+    nextBoundary.setHours(next.hour, next.minute, 0, 0);
   }
   greetingTimer = window.setTimeout(() => scheduleGreetingUpdate(), nextBoundary.getTime() - now.getTime() + 1_000);
 }
@@ -455,7 +469,7 @@ async function launchAll(): Promise<void> {
 
 async function refreshRunningApps(initial = false): Promise<void> {
   if (runningDetectionInFlight) return;
-  const targets = shortcuts.filter(supportsRunningDetection).map((shortcut) => shortcut.target);
+  const targets = [...new Set(shortcuts.filter(supportsRunningDetection).map((shortcut) => shortcut.target))];
   if (initial) {
     runningDetectionPending = true;
     render();
