@@ -40,7 +40,7 @@
 - 当前安装包约 `3.1 MB`，主程序约 `12.7 MB`；应用运行依赖 Windows 已安装的 Microsoft Edge WebView2 Runtime。
 - 日常运行建议预留约 `500 MB` 可用内存。批量打开的其他应用不属于 Serenook 自身占用，并会以 650 毫秒间隔依次启动。
 
-这里的“峰值”是本次实测峰值，但不覆盖所有机器的硬性上限。
+这里的“峰值”是作者本地实验的实测峰值，但并不覆盖所有机器的硬性上限。
 
 ## 开发环境
 
@@ -50,17 +50,6 @@
 .\scripts\dev.ps1
 .\scripts\build.ps1
 ```
-
-## 发布与应用内更新
-
-仓库包含 Windows Release 工作流。推送形如 `v0.9.0` 的版本标签，或在 GitHub Actions 中手动运行 `Release Serenook`，会构建、测试并创建一个草稿 Release，包含 NSIS 安装包、更新签名与 `latest.json`。
-
-首次使用前，需要在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 中添加：
-
-- `TAURI_SIGNING_PRIVATE_KEY`：Tauri 更新签名私钥的完整内容。
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码；无密码密钥可留空，但正式发布更推荐使用带密码密钥。
-
-签名私钥不得提交到仓库。若私钥遗失，已经安装旧公钥版本的用户将无法验证后续更新。
 
 ## 参考
 
