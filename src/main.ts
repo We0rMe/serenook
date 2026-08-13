@@ -7,6 +7,7 @@ import "./styles.css";
 
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet";
 type ShortcutKind = "local" | "web";
+type ThemePreference = "system" | "light" | "dark";
 
 interface AppShortcut {
   id: string;
@@ -21,6 +22,7 @@ interface AppSettings {
   signature: string;
   launchOnStartup: boolean;
   hasCompletedWelcome: boolean;
+  theme: ThemePreference;
 }
 
 const DEFAULT_SIGNATURE = "慢一点，也是在向前。";
@@ -28,6 +30,7 @@ const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
 const GREETING_BOUNDARY_HOURS = [6, 11, 14, 18, 24];
 const FILE_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path d="M9.25 12h5.5M9.25 15.5h4"/></svg>';
+const SHEET_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path class="sheet-grid" d="M9 11h6v6H9zM9 14h6M12 11v6"/></svg>';
 
 const ICONS: Record<string, string> = {
   app: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>',
@@ -49,7 +52,7 @@ const ICONS: Record<string, string> = {
   signature: '<svg viewBox="0 0 24 24"><path d="M4 17c3-6 5-9 7-9 3 0-1 8 2 8 2 0 3-4 5-4 1.5 0 .3 4 2 4"/><path d="M4 20h16"/></svg>',
   layers: '<svg viewBox="0 0 24 24"><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 16l8 4 8-4"/></svg>',
   document: FILE_ICON_SVG,
-  sheet: FILE_ICON_SVG,
+  sheet: SHEET_ICON_SVG,
   book: '<svg viewBox="0 0 24 24"><path d="M4 5.5c3.2-.8 5.8-.2 8 1.7v12c-2.2-1.9-4.8-2.5-8-1.7v-12Z"/><path d="M20 5.5c-3.2-.8-5.8-.2-8 1.7v12c2.2-1.9 4.8-2.5 8-1.7v-12Z"/></svg>',
   arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></svg>',
   back: '<svg viewBox="0 0 24 24"><path d="M19 12H5M10 7l-5 5 5 5"/></svg>',
@@ -99,6 +102,9 @@ const bulkSettingButton = element<HTMLButtonElement>("bulk-setting-button");
 const bulkEditor = element<HTMLElement>("bulk-editor");
 const sleepAllButton = element<HTMLButtonElement>("sleep-all-button");
 const wakeAllButton = element<HTMLButtonElement>("wake-all-button");
+const themeSettingButton = element<HTMLButtonElement>("theme-setting-button");
+const themeEditor = element<HTMLElement>("theme-editor");
+const themeToggle = element<HTMLButtonElement>("theme-toggle");
 const guideSettingButton = element<HTMLButtonElement>("guide-setting-button");
 const guideView = element<HTMLElement>("guide-view");
 const guideBackButton = element<HTMLButtonElement>("guide-back-button");
@@ -117,7 +123,12 @@ const updateLaterButton = element<HTMLButtonElement>("update-later-button");
 const updateInstallButton = element<HTMLButtonElement>("update-install-button");
 
 let shortcuts: AppShortcut[] = [];
-let settings: AppSettings = { signature: DEFAULT_SIGNATURE, launchOnStartup: false, hasCompletedWelcome: false };
+let settings: AppSettings = {
+  signature: DEFAULT_SIGNATURE,
+  launchOnStartup: false,
+  hasCompletedWelcome: false,
+  theme: "system",
+};
 const appIcons = new Map<string, string | null>();
 const runningTargets = new Set<string>();
 let editing = false;
@@ -288,7 +299,9 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   const iconData = usesBuiltInFileIcon ? null : appIcons.get(iconCacheKey(shortcut));
   if (usesBuiltInFileIcon) {
     iconHolder.classList.add("is-file-icon");
-    iconHolder.innerHTML = FILE_ICON_SVG;
+    iconHolder.innerHTML = shortcut.icon === "sheet" || fileMarker === "CSV" || fileMarker === "XLSX"
+      ? SHEET_ICON_SVG
+      : FILE_ICON_SVG;
   } else if (iconData) {
     const image = document.createElement("img");
     image.className = "app-icon-image";
@@ -676,13 +689,15 @@ function closeSettings(): void {
   settingsBackdrop.hidden = true;
   setSettingsEditor(signatureSettingButton, signatureEditor, false);
   setSettingsEditor(bulkSettingButton, bulkEditor, false);
+  setSettingsEditor(themeSettingButton, themeEditor, false);
   setSettingsEditor(startupSettingButton, startupEditor, false);
   settingsButton.focus();
 }
 
-function closeOtherSettingsEditors(except: "signature" | "bulk" | "startup"): void {
+function closeOtherSettingsEditors(except: "signature" | "bulk" | "theme" | "startup"): void {
   if (except !== "signature") setSettingsEditor(signatureSettingButton, signatureEditor, false);
   if (except !== "bulk") setSettingsEditor(bulkSettingButton, bulkEditor, false);
+  if (except !== "theme") setSettingsEditor(themeSettingButton, themeEditor, false);
   if (except !== "startup") setSettingsEditor(startupSettingButton, startupEditor, false);
 }
 
@@ -715,6 +730,42 @@ function toggleStartupEditor(): void {
   closeOtherSettingsEditors("startup");
   setSettingsEditor(startupSettingButton, startupEditor, opening);
   if (opening) window.setTimeout(() => startupToggle.focus(), 0);
+}
+
+function toggleThemeEditor(): void {
+  const opening = !themeEditor.classList.contains("is-open");
+  closeOtherSettingsEditors("theme");
+  setSettingsEditor(themeSettingButton, themeEditor, opening);
+  if (opening) window.setTimeout(() => themeToggle.focus(), 0);
+}
+
+function effectiveTheme(): "light" | "dark" {
+  if (settings.theme === "light" || settings.theme === "dark") return settings.theme;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function renderThemeSetting(): void {
+  const theme = effectiveTheme();
+  if (settings.theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+}
+
+async function toggleTheme(): Promise<void> {
+  const previous = settings;
+  settings = { ...settings, theme: effectiveTheme() === "dark" ? "light" : "dark" };
+  renderThemeSetting();
+  themeToggle.disabled = true;
+  try {
+    await invoke("save_settings", { settings });
+    showToast(settings.theme === "dark" ? "已切换至深色模式" : "已切换至浅色模式");
+  } catch (error) {
+    settings = previous;
+    renderThemeSetting();
+    showToast(errorMessage(error), true);
+  } finally {
+    themeToggle.disabled = false;
+  }
 }
 
 function renderStartupSetting(): void {
@@ -915,6 +966,7 @@ async function initialize(): Promise<void> {
 
   render();
   renderStartupSetting();
+  renderThemeSetting();
   if (!settings.hasCompletedWelcome) await openWelcomeOnce();
   void hydrateAppIcons(shortcuts);
   await refreshRunningApps(true);
@@ -936,6 +988,7 @@ settingsCloseButton.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
 signatureSettingButton.addEventListener("click", toggleSignatureEditor);
 bulkSettingButton.addEventListener("click", toggleBulkEditor);
+themeSettingButton.addEventListener("click", toggleThemeEditor);
 guideSettingButton.addEventListener("click", () => openGuide());
 guideBackButton.addEventListener("click", closeGuide);
 welcomeSkipButton.addEventListener("click", () => completeWelcome(false));
@@ -950,6 +1003,7 @@ updateDialog.addEventListener("cancel", (event) => {
 });
 startupSettingButton.addEventListener("click", toggleStartupEditor);
 startupToggle.addEventListener("click", () => void toggleStartup());
+themeToggle.addEventListener("click", () => void toggleTheme());
 sleepAllButton.addEventListener("click", () => void setAllSleeping(true));
 wakeAllButton.addEventListener("click", () => void setAllSleeping(false));
 element<HTMLButtonElement>("signature-cancel-button").addEventListener("click", toggleSignatureEditor);

@@ -23,7 +23,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --background: #181715;
     --titlebar: #1d1c19;
@@ -44,6 +44,28 @@
     --danger-soft: #472d26;
     --overlay: rgba(0, 0, 0, 0.52);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #181715;
+  --titlebar: #1d1c19;
+  --surface: #252320;
+  --surface-hover: #2c2925;
+  --surface-raised: #201f1c;
+  --text: #faf9f5;
+  --body: #d4d0c8;
+  --muted: #a09d96;
+  --faint: #77736c;
+  --footer-ink: #aaa69d;
+  --border: #36332e;
+  --border-strong: #514a42;
+  --accent: #dc8f74;
+  --accent-active: #c9785d;
+  --accent-soft: #3a2a24;
+  --danger: #e29179;
+  --danger-soft: #472d26;
+  --overlay: rgba(0, 0, 0, 0.52);
 }
 
 * {
@@ -363,6 +385,10 @@ h1 {
   height: 30px;
   stroke-width: 1.35;
   transform: translate(-50%, -50%);
+}
+
+.app-icon.is-file-icon .sheet-grid {
+  stroke-width: 1.15;
 }
 
 .shortcut-name {
@@ -1637,14 +1663,23 @@ h1 {
 }
 
 @media (prefers-color-scheme: dark) {
-  .app-icon-image {
+  :root:not([data-theme="light"]) .app-icon-image {
     filter: none;
     opacity: 0.82;
   }
 
-  .sleeping-card .app-icon-image {
+  :root:not([data-theme="light"]) .sleeping-card .app-icon-image {
     opacity: 0.46;
   }
+}
+
+:root[data-theme="dark"] .app-icon-image {
+  filter: none;
+  opacity: 0.82;
+}
+
+:root[data-theme="dark"] .sleeping-card .app-icon-image {
+  opacity: 0.46;
 }
 
 @media (prefers-reduced-motion: reduce) {

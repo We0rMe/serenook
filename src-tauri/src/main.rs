@@ -82,6 +82,17 @@ struct AppSettings {
     launch_on_startup: bool,
     #[serde(default = "existing_user_has_completed_welcome")]
     has_completed_welcome: bool,
+    #[serde(default)]
+    theme: ThemePreference,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ThemePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 fn existing_user_has_completed_welcome() -> bool {
@@ -94,6 +105,7 @@ impl Default for AppSettings {
             signature: DEFAULT_SIGNATURE.into(),
             launch_on_startup: false,
             has_completed_welcome: false,
+            theme: ThemePreference::System,
         }
     }
 }
@@ -782,6 +794,7 @@ mod tests {
             signature: " ".into(),
             launch_on_startup: false,
             has_completed_welcome: false,
+            theme: ThemePreference::System,
         })
         .is_err());
     }
@@ -791,6 +804,7 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(r#"{"signature":"慢一点。"}"#).unwrap();
         assert!(!settings.launch_on_startup);
         assert!(settings.has_completed_welcome);
+        assert_eq!(settings.theme, ThemePreference::System);
     }
 
     #[test]

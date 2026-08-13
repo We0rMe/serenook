@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="./docs/assets/serenook-readme-hero.png" alt="Hello, Serenook" width="100%">
+</p>
+
 # Serenook
 
-一个安静、简洁的 Windows 工作台，由 JuvenileScholar 署名。它保存本地应用、在线网址与常用文档入口，并在点击时交给对应程序或默认浏览器打开。
+一个安静、简洁的 Windows 工作台，它保存本地应用、在线网址与常用文档入口，并在点击时交给对应程序或默认浏览器打开。
 
 ## 当前范围
 
@@ -21,31 +25,44 @@
 - 自定义标题栏支持最小化、最大化/还原与关闭窗口
 - 支持 `.exe`、`.lnk`、`.bat`、`.cmd`、`.url`、`.txt`、`.csv`、`.xlsx` 以及 `http://`、`https://` 网址
 - 将快捷方式配置保存在 Windows 当前用户的应用配置目录
-- 跟随系统浅色/深色外观
+- 初次沿用系统外观，并可在设置中切换、记忆浅色或深色模式
+- 启动后轻量检查 GitHub Releases；发现新版本时可查看说明、下载、安装并重新打开 Serenook
 - 用户可见软件名为 Serenook；内部标识符继续沿用旧值，以兼容原有 JuvenileScholar 配置
 - 不包含账号、云同步、最近记录、拖动排序或应用内控制
 
-## 项目位置
+## 资源占用
 
-- 源码与构建产物：`E:\Codex\JuvenileScholar`
-- Rust 与 Cargo：`D:\DevTools\JuvenileScholar`
-- pnpm 仓库与缓存：`D:\DevTools\JuvenileScholar`
-- 临时构建文件：`E:\Codex\JuvenileScholar\.tmp`
+以下数据来自 Windows 本机对本轮发布构建的静置采样，实际数值会因 Windows、Microsoft Edge WebView2 版本、已导入入口数量和页面状态而变化：
+
+- Serenook 主进程静置工作集约 `28–31 MB`，私有内存约 `8–9 MB`。
+- 将 WebView2 子进程全部计入时，本次启动峰值工作集约 `366 MB`，私有内存约 `224 MB`。
+- 本次采样共包含 1 个 Serenook 主进程与 6 个 WebView2 子进程；关闭 Serenook 两秒后，相关 WebView2 子进程为 0。
+- 当前安装包约 `3.1 MB`，主程序约 `12.7 MB`；应用运行依赖 Windows 已安装的 Microsoft Edge WebView2 Runtime。
+- CPU 在完成启动与运行状态检查后基本保持空闲；本次连续采样中主进程累计 CPU 时间稳定在约 `0.05` 秒。
+- 日常运行建议预留约 `500 MB` 可用内存与单个空闲 CPU 核心。批量打开的其他应用不属于 Serenook 自身占用，并会以 650 毫秒间隔依次启动。
+
+这里的“峰值”是本次实测峰值，不是覆盖所有机器的硬性上限；正式发布前可以继续在更多 Windows 设备上补充基准。
 
 ## 开发环境
 
-项目使用 Tauri 2、TypeScript 和 Vite。运行 Rust/Tauri 命令前，需要设置：
-
-```powershell
-$env:CARGO_HOME = 'D:\DevTools\JuvenileScholar\cargo'
-$env:RUSTUP_HOME = 'D:\DevTools\JuvenileScholar\rustup'
-$env:TEMP = 'E:\Codex\JuvenileScholar\.tmp'
-$env:TMP = 'E:\Codex\JuvenileScholar\.tmp'
-```
-
-也可以直接使用已经固定好路径的脚本：
+项目使用 Tauri 2、TypeScript 和 Vite。仓库中的脚本不包含开发者用户名或固定工具目录；需要将 `cargo`、`pnpm` 与 Node.js 放入 `PATH`。如需让依赖与编译缓存避开系统盘，可在本机自行设置 `CARGO_HOME`、`RUSTUP_HOME`、`CARGO_TARGET_DIR` 和 pnpm store。然后运行：
 
 ```powershell
 .\scripts\dev.ps1
 .\scripts\build.ps1
 ```
+
+## 发布与应用内更新
+
+仓库包含 Windows Release 工作流。推送形如 `v0.9.0` 的版本标签，或在 GitHub Actions 中手动运行 `Release Serenook`，会构建、测试并创建一个草稿 Release，包含 NSIS 安装包、更新签名与 `latest.json`。
+
+首次使用前，需要在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 中添加：
+
+- `TAURI_SIGNING_PRIVATE_KEY`：Tauri 更新签名私钥的完整内容。
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码；无密码密钥可留空，但正式发布更推荐使用带密码密钥。
+
+签名私钥不得提交到仓库。若私钥遗失，已经安装旧公钥版本的用户将无法验证后续更新。
+
+## 参考
+
+- [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md) — Apple、Claude 等产品设计语言的 Markdown 资料集合，为 Serenook 的视觉探索提供参考。
