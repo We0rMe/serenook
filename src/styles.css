@@ -313,6 +313,7 @@ h1 {
 
 .shortcut-grid[hidden],
 .empty-state[hidden],
+.schedule-button[hidden],
 .launch-all-button[hidden] {
   display: none;
 }
@@ -411,6 +412,22 @@ h1 {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.schedule-summary {
+  max-width: 100%;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduling .shortcut-card {
+  border-color: color-mix(in srgb, var(--border-strong) 72%, transparent);
 }
 
 .shortcut-corner {
@@ -639,12 +656,49 @@ h1 {
   color: var(--footer-ink);
 }
 
+.footer-art {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+}
+
 .footer-drawing {
   width: 150px;
   height: auto;
   stroke-width: 1.2;
   pointer-events: none;
 }
+
+.anniversary-plant {
+  width: 47px;
+  height: 73px;
+  margin: 0 -2px 5px 0;
+  padding: 0;
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--footer-ink);
+  cursor: pointer;
+}
+
+.anniversary-plant svg {
+  width: 100%;
+  height: 100%;
+  stroke-width: 1.2;
+}
+
+.plant-stems {
+  transform-origin: 50% 88%;
+  transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.anniversary-plant:hover .plant-stems {
+  transform: rotate(-2deg) translateY(-1px);
+}
+
+.plant-line-1 { animation-delay: 1550ms; }
+.plant-line-2 { animation-delay: 2050ms; }
+.plant-line-3 { animation-delay: 2700ms; }
 
 .draw-line {
   stroke-dasharray: 1;
@@ -672,8 +726,38 @@ h1 {
   animation: write-name 2400ms ease-in-out 2600ms forwards, reveal-name 600ms ease-out 4750ms forwards;
 }
 
+.handwritten-name.is-leaving {
+  animation: erase-name 720ms ease-in forwards;
+}
+
+.handwritten-name.is-message {
+  font-size: 17px;
+  letter-spacing: -0.035em;
+  stroke-dasharray: 360;
+  stroke-dashoffset: 360;
+}
+
+.handwritten-name.is-love-message {
+  font-size: 14px;
+  letter-spacing: -0.045em;
+}
+
+.handwritten-name.is-entering {
+  animation: write-name 1800ms ease-in-out forwards, reveal-name 520ms ease-out 1450ms forwards;
+}
+
 .name-flourish {
   animation-delay: 4500ms;
+}
+
+.name-flourish.is-leaving {
+  animation: erase-flourish 720ms ease-in forwards;
+}
+
+.name-flourish.is-hidden {
+  stroke-dashoffset: 1;
+  opacity: 0;
+  animation: none;
 }
 
 @keyframes draw-line {
@@ -686,6 +770,30 @@ h1 {
 
 @keyframes reveal-name {
   to { fill-opacity: 0.88; }
+}
+
+@keyframes erase-name {
+  from {
+    fill-opacity: 0.88;
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  to {
+    fill-opacity: 0;
+    stroke-dashoffset: 360;
+    opacity: 0;
+  }
+}
+
+@keyframes erase-flourish {
+  from {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  to {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
 }
 
 .footer-note span {
@@ -955,6 +1063,92 @@ h1 {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
+.schedule-app-name {
+  margin: 0;
+  color: var(--text);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 18px;
+}
+
+.schedule-help {
+  margin: 6px 0 22px;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.weekday-selector {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  border: 0;
+}
+
+.shortcut-dialog .weekday-option {
+  position: relative;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.shortcut-dialog .weekday-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.weekday-option span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--muted);
+  font-size: 12px;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.weekday-option small {
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.weekday-option:hover span {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.weekday-option input:checked + span {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.weekday-option input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.schedule-remove-button {
+  color: var(--faint);
+}
+
+.schedule-remove-button:hover {
+  background: var(--surface);
+  color: var(--muted);
+}
+
 .path-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1204,6 +1398,14 @@ h1 {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
+}
+
+.anniversary-copy {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .signature-form input {
@@ -1696,6 +1898,8 @@ h1 {
   .sleep-switch > span,
   .setting-switch,
   .setting-switch-knob,
+  .weekday-option span,
+  .plant-stems,
   .welcome-card,
   .guide-view {
     transition: none;
@@ -1703,7 +1907,7 @@ h1 {
 
   .draw-line,
   .handwritten-name {
-    animation: none;
+    animation: none !important;
     stroke-dashoffset: 0;
   }
 

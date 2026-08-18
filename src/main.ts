@@ -16,6 +16,7 @@ interface AppShortcut {
   icon: IconName;
   kind: ShortcutKind;
   sleeping: boolean;
+  wakeDays?: number[];
 }
 
 interface AppSettings {
@@ -23,11 +24,34 @@ interface AppSettings {
   launchOnStartup: boolean;
   hasCompletedWelcome: boolean;
   theme: ThemePreference;
+  anniversaryDate: string | null;
 }
 
 const DEFAULT_SIGNATURE = "慢一点，也是在向前。";
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
+const MILLISECONDS_PER_DAY = 86_400_000;
+const WEEKDAYS = [
+  { value: 1, short: "一" },
+  { value: 2, short: "二" },
+  { value: 3, short: "三" },
+  { value: 4, short: "四" },
+  { value: 5, short: "五" },
+  { value: 6, short: "六" },
+  { value: 0, short: "日" },
+] as const;
+const SPECIAL_ANNIVERSARY_GREETINGS: Record<number, string> = {
+  52: "第五十二天，喜欢在寻常里悄悄长成。",
+  100: "一百天，时光把心意写成了温柔的篇章。",
+  520: "五百二十天，爱意不必喧哗，也一直在。",
+  1000: "一千天，漫长的陪伴有了温柔的名字。",
+  2000: "两千天，日子走了很远，我们仍在彼此身边。",
+  3000: "三千天，岁月深处，仍有初见时的光。",
+  4000: "四千天，平凡相伴，已是生活最动人的答案。",
+  5200: "五千二百天，爱藏在每一个普通却相守的今天。",
+  10000: "一万天，万千日夜，终成一生珍藏的温柔。",
+  52000: "五万二千天，时间很长，爱比时间更长。",
+};
 const GREETING_BOUNDARIES = [
   { hour: 6, minute: 0 },
   { hour: 9, minute: 30 },
@@ -65,6 +89,8 @@ const ICONS: Record<string, string> = {
   arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></svg>',
   back: '<svg viewBox="0 0 24 24"><path d="M19 12H5M10 7l-5 5 5 5"/></svg>',
   startup: '<svg viewBox="0 0 24 24"><path d="M12 3v9M8.5 6.2A7.5 7.5 0 1 0 15.5 6"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/></svg>',
+  flower: '<svg viewBox="0 0 24 24"><path d="M12 21v-8M12 17c-3-3-6-3-8-1 2 3 5 4 8 1ZM12 15c3-3 6-3 8-1-2 3-5 4-8 1Z"/><path d="M12 5c1.5-3 5-1.5 4 1.2 3-.6 3.8 3 .9 3.8.4 3-3.3 3.5-4 1-2 2.3-4.8-.1-3.1-2.4-2.8-1.2-1.5-4.7 1.2-4.2.2-2.4 3.7-3.2 4-1Z"/></svg>',
 };
 
 const appWindow = getCurrentWindow();
@@ -76,6 +102,8 @@ const editButton = element<HTMLButtonElement>("edit-button");
 const editLabel = editButton.querySelector<HTMLElement>(".edit-label")!;
 const launchAllButton = element<HTMLButtonElement>("launch-all-button");
 const launchAllLabel = element<HTMLElement>("launch-all-label");
+const scheduleButton = element<HTMLButtonElement>("schedule-button");
+const scheduleLabel = scheduleButton.querySelector<HTMLElement>(".schedule-label")!;
 const sleepSection = element<HTMLElement>("sleep-section");
 const sleepToggle = element<HTMLButtonElement>("sleep-toggle");
 const sleepContent = element<HTMLElement>("sleep-content");
@@ -106,6 +134,11 @@ const signatureForm = element<HTMLFormElement>("signature-form");
 const signatureInput = element<HTMLInputElement>("signature-input");
 const signatureError = element<HTMLElement>("signature-error");
 const signatureText = element<HTMLElement>("signature-text");
+const anniversarySettingButton = element<HTMLButtonElement>("anniversary-setting-button");
+const anniversaryEditor = element<HTMLElement>("anniversary-editor");
+const anniversaryForm = element<HTMLFormElement>("anniversary-form");
+const anniversaryInput = element<HTMLInputElement>("anniversary-input");
+const anniversaryError = element<HTMLElement>("anniversary-error");
 const bulkSettingButton = element<HTMLButtonElement>("bulk-setting-button");
 const bulkEditor = element<HTMLElement>("bulk-editor");
 const sleepAllButton = element<HTMLButtonElement>("sleep-all-button");
@@ -129,6 +162,15 @@ const updateNotes = element<HTMLElement>("update-notes");
 const updateStatus = element<HTMLElement>("update-status");
 const updateLaterButton = element<HTMLButtonElement>("update-later-button");
 const updateInstallButton = element<HTMLButtonElement>("update-install-button");
+const scheduleDialog = element<HTMLDialogElement>("schedule-dialog");
+const scheduleForm = element<HTMLFormElement>("schedule-form");
+const scheduleAppName = element<HTMLElement>("schedule-app-name");
+const scheduleRemoveButton = element<HTMLButtonElement>("schedule-remove-button");
+const scheduleDayInputs = [...scheduleForm.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+const anniversaryPlant = element<HTMLButtonElement>("anniversary-plant");
+const footerName = element<SVGTextElement>("footer-name");
+const footerNameFlourish = element<SVGPathElement>("footer-name-flourish");
+const footerDrawing = element<SVGSVGElement>("footer-drawing");
 
 let shortcuts: AppShortcut[] = [];
 let settings: AppSettings = {
@@ -136,10 +178,12 @@ let settings: AppSettings = {
   launchOnStartup: false,
   hasCompletedWelcome: false,
   theme: "system",
+  anniversaryDate: null,
 };
 const appIcons = new Map<string, string | null>();
 const runningTargets = new Set<string>();
 let editing = false;
+let scheduling = false;
 let sleepExpanded = false;
 let launchingAll = false;
 let newShortcutSleeping = false;
@@ -151,11 +195,13 @@ let toastTimer: number | undefined;
 let welcomeOpen = false;
 let availableUpdate: Update | null = null;
 let updateCheckStarted = false;
+let scheduledShortcutId = "";
+let footerMessageShown = false;
 
-function element<T extends HTMLElement>(id: string): T {
+function element<T extends Element>(id: string): T {
   const value = document.getElementById(id);
   if (!value) throw new Error(`Missing element: ${id}`);
-  return value as T;
+  return value as unknown as T;
 }
 
 function icon(name: string): HTMLSpanElement {
@@ -206,7 +252,65 @@ function setTargetMode(kind: ShortcutKind, clearTarget = false): void {
     : "支持应用、快捷方式以及 .txt、.csv、.xlsx 文档";
 }
 
+function isoDateForInput(date = new Date()): string {
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function calendarDateInstant(value: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1900) return null;
+  const instant = Date.UTC(year, month - 1, day);
+  const parsed = new Date(instant);
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day
+    ? instant
+    : null;
+}
+
+function anniversaryDayCount(now = new Date()): number | null {
+  if (!settings.anniversaryDate) return null;
+  const start = calendarDateInstant(settings.anniversaryDate);
+  if (start === null) return null;
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  if (today < start) return null;
+  return Math.floor((today - start) / MILLISECONDS_PER_DAY) + 1;
+}
+
+function specialAnniversaryGreeting(now = new Date()): string | null {
+  const days = anniversaryDayCount(now);
+  return days === null ? null : SPECIAL_ANNIVERSARY_GREETINGS[days] ?? null;
+}
+
+function scheduleSummary(wakeDays: number[] | undefined): string {
+  if (wakeDays === undefined) return "未安排";
+  if (wakeDays.length === 0) return "保持睡眠";
+  if (wakeDays.length === 7) return "每天苏醒";
+  return WEEKDAYS
+    .filter(({ value }) => wakeDays.includes(value))
+    .map(({ short }) => `周${short}`)
+    .join(" · ");
+}
+
+function applyWeeklySchedules(items: AppShortcut[], weekday: number): AppShortcut[] {
+  return items.map((shortcut) => shortcut.wakeDays === undefined
+    ? shortcut
+    : { ...shortcut, sleeping: !shortcut.wakeDays.includes(weekday) });
+}
+
 function updateGreeting(now = new Date()): void {
+  const anniversaryGreeting = specialAnniversaryGreeting(now);
+  if (anniversaryGreeting) {
+    pageTitle.textContent = anniversaryGreeting;
+    return;
+  }
   const weekdayGreetings = [
     "周日安好，宜感受自然。",
     "新的一周，稳稳开始。",
@@ -237,6 +341,15 @@ function scheduleGreetingUpdate(now = new Date()): void {
   updateGreeting(now);
   window.clearTimeout(greetingTimer);
   const nextBoundary = new Date(now);
+  if (specialAnniversaryGreeting(now)) {
+    nextBoundary.setDate(nextBoundary.getDate() + 1);
+    nextBoundary.setHours(0, 0, 0, 0);
+    greetingTimer = window.setTimeout(
+      () => scheduleGreetingUpdate(),
+      nextBoundary.getTime() - now.getTime() + 1_000,
+    );
+    return;
+  }
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const next = GREETING_BOUNDARIES.find(({ hour, minute }) => hour * 60 + minute > currentMinutes)
     ?? GREETING_BOUNDARIES[GREETING_BOUNDARIES.length - 1];
@@ -298,13 +411,15 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   if (running) card.classList.add("running-card");
   card.setAttribute(
     "aria-label",
-    shortcut.sleeping
-      ? `管理睡眠中的 ${shortcut.name}`
-      : editing
-        ? `编辑 ${shortcut.name}`
-        : running
-          ? `${shortcut.name} 已在运行`
-          : `打开 ${shortcut.name}`,
+    scheduling
+      ? `安排 ${shortcut.name} 的每周作息`
+      : shortcut.sleeping
+        ? `管理睡眠中的 ${shortcut.name}`
+        : editing
+          ? `编辑 ${shortcut.name}`
+          : running
+            ? `${shortcut.name} 已在运行`
+            : `打开 ${shortcut.name}`,
   );
 
   const iconHolder = document.createElement("span");
@@ -333,6 +448,13 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   name.textContent = shortcut.name;
   card.append(iconHolder, name);
 
+  if (scheduling) {
+    const summary = document.createElement("span");
+    summary.className = "schedule-summary";
+    summary.textContent = scheduleSummary(shortcut.wakeDays);
+    card.append(summary);
+  }
+
   if (kind === "web") {
     const marker = document.createElement("span");
     marker.className = "online-marker";
@@ -357,16 +479,17 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
     card.append(marker);
   }
 
-  if (shortcut.sleeping || editing) {
+  if (scheduling || shortcut.sleeping || editing) {
     card.classList.add("has-corner");
     const corner = document.createElement("span");
     corner.className = "shortcut-corner";
-    corner.append(icon(shortcut.sleeping ? "moon" : "edit"));
+    corner.append(icon(scheduling ? "calendar" : shortcut.sleeping ? "moon" : "edit"));
     card.append(corner);
   }
 
   card.addEventListener("click", () => {
-    if (shortcut.sleeping || editing) openEditor(shortcut);
+    if (scheduling) openScheduleEditor(shortcut);
+    else if (shortcut.sleeping || editing) openEditor(shortcut);
     else if (running) showToast(`${shortcut.name} 已在运行`);
     else void launch(shortcut);
   });
@@ -400,7 +523,7 @@ function render(): void {
   shortcutGrid.replaceChildren(...awake.map(createShortcutCard));
   if (editing) shortcutGrid.append(createAddCard());
   shortcutGrid.hidden = awake.length === 0 && !editing;
-  emptyState.hidden = awake.length > 0 || editing;
+  emptyState.hidden = awake.length > 0 || editing || scheduling;
 
   sleepGrid.replaceChildren(...sleeping.map(createShortcutCard));
   sleepSection.hidden = sleeping.length === 0;
@@ -411,9 +534,13 @@ function render(): void {
   sleepToggle.setAttribute("aria-expanded", String(sleepExpanded));
 
   document.body.classList.toggle("editing", editing);
+  document.body.classList.toggle("scheduling", scheduling);
   editButton.setAttribute("aria-pressed", String(editing));
   editLabel.textContent = editing ? "完成" : "编辑";
-  launchAllButton.hidden = awake.length === 0 || editing;
+  scheduleButton.setAttribute("aria-pressed", String(scheduling));
+  scheduleLabel.textContent = scheduling ? "完成" : "作息";
+  scheduleButton.hidden = shortcuts.length === 0;
+  launchAllButton.hidden = awake.length === 0 || editing || scheduling;
   launchAllButton.disabled = launchingAll || runningDetectionPending || launchable.length === 0;
   launchAllButton.setAttribute("aria-busy", String(launchingAll || runningDetectionPending));
   launchAllLabel.textContent = runningDetectionPending
@@ -620,6 +747,9 @@ async function saveFromForm(): Promise<void> {
     icon: inferIcon(name, target, kind),
     kind,
     sleeping: existingIndex >= 0 ? shortcuts[existingIndex].sleeping : newShortcutSleeping,
+    ...(existingIndex >= 0 && shortcuts[existingIndex].wakeDays !== undefined
+      ? { wakeDays: shortcuts[existingIndex].wakeDays }
+      : {}),
   };
 
   const previous = shortcuts;
@@ -681,6 +811,67 @@ async function removeCurrent(): Promise<void> {
   }
 }
 
+function openScheduleEditor(shortcut: AppShortcut): void {
+  scheduledShortcutId = shortcut.id;
+  scheduleAppName.textContent = shortcut.name;
+  const selectedDays = shortcut.wakeDays
+    ?? (shortcut.sleeping ? [] : WEEKDAYS.map(({ value }) => value));
+  scheduleDayInputs.forEach((input) => {
+    input.checked = selectedDays.includes(Number(input.value));
+  });
+  scheduleRemoveButton.hidden = shortcut.wakeDays === undefined;
+  scheduleDialog.showModal();
+  window.setTimeout(() => scheduleDayInputs[0]?.focus(), 0);
+}
+
+function closeScheduleEditor(): void {
+  scheduleDialog.close();
+  scheduleButton.focus();
+}
+
+async function saveSchedule(): Promise<void> {
+  const index = shortcuts.findIndex((shortcut) => shortcut.id === scheduledShortcutId);
+  if (index < 0) return;
+  const previous = shortcuts;
+  const wakeDays = scheduleDayInputs
+    .filter((input) => input.checked)
+    .map((input) => Number(input.value));
+  const current = shortcuts[index];
+  shortcuts = shortcuts.map((shortcut, shortcutIndex) =>
+    shortcutIndex === index ? { ...shortcut, wakeDays } : shortcut,
+  );
+
+  try {
+    await persist();
+    closeScheduleEditor();
+    render();
+    showToast(`${current.name} 的作息已保存，下次打开时生效`);
+  } catch (error) {
+    shortcuts = previous;
+    showToast(errorMessage(error), true);
+  }
+}
+
+async function removeSchedule(): Promise<void> {
+  const index = shortcuts.findIndex((shortcut) => shortcut.id === scheduledShortcutId);
+  if (index < 0) return;
+  const previous = shortcuts;
+  const current = shortcuts[index];
+  const next = { ...current };
+  delete next.wakeDays;
+  shortcuts = shortcuts.map((shortcut, shortcutIndex) => shortcutIndex === index ? next : shortcut);
+
+  try {
+    await persist();
+    closeScheduleEditor();
+    render();
+    showToast(`已取消 ${current.name} 的作息`);
+  } catch (error) {
+    shortcuts = previous;
+    showToast(errorMessage(error), true);
+  }
+}
+
 function openSettings(): void {
   settingsBackdrop.hidden = false;
   settingsPanel.classList.add("is-open");
@@ -702,14 +893,16 @@ function closeSettings(): void {
   settingsButton.setAttribute("aria-expanded", "false");
   settingsBackdrop.hidden = true;
   setSettingsEditor(signatureSettingButton, signatureEditor, false);
+  setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
   setSettingsEditor(bulkSettingButton, bulkEditor, false);
   setSettingsEditor(themeSettingButton, themeEditor, false);
   setSettingsEditor(startupSettingButton, startupEditor, false);
   settingsButton.focus();
 }
 
-function closeOtherSettingsEditors(except: "signature" | "bulk" | "theme" | "startup"): void {
+function closeOtherSettingsEditors(except: "signature" | "anniversary" | "bulk" | "theme" | "startup"): void {
   if (except !== "signature") setSettingsEditor(signatureSettingButton, signatureEditor, false);
+  if (except !== "anniversary") setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
   if (except !== "bulk") setSettingsEditor(bulkSettingButton, bulkEditor, false);
   if (except !== "theme") setSettingsEditor(themeSettingButton, themeEditor, false);
   if (except !== "startup") setSettingsEditor(startupSettingButton, startupEditor, false);
@@ -726,6 +919,18 @@ function toggleSignatureEditor(): void {
       signatureInput.focus();
       signatureInput.select();
     }, 0);
+  }
+}
+
+function toggleAnniversaryEditor(): void {
+  const opening = !anniversaryEditor.classList.contains("is-open");
+  closeOtherSettingsEditors("anniversary");
+  setSettingsEditor(anniversarySettingButton, anniversaryEditor, opening);
+  anniversaryError.hidden = true;
+  if (opening) {
+    anniversaryInput.max = isoDateForInput();
+    anniversaryInput.value = settings.anniversaryDate ?? "";
+    window.setTimeout(() => anniversaryInput.focus(), 0);
   }
 }
 
@@ -964,20 +1169,67 @@ async function saveSignature(): Promise<void> {
   }
 }
 
+async function saveAnniversary(): Promise<void> {
+  const anniversaryDate = anniversaryInput.value;
+  const instant = calendarDateInstant(anniversaryDate);
+  const today = calendarDateInstant(isoDateForInput());
+  if (instant === null || today === null || instant > today) {
+    anniversaryError.textContent = "请选择一个不晚于今天的真实日期。";
+    anniversaryError.hidden = false;
+    return;
+  }
+
+  const previous = settings;
+  settings = { ...settings, anniversaryDate };
+  try {
+    await invoke("save_settings", { settings });
+    setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
+    scheduleGreetingUpdate();
+    showToast("第一天已经好好记下");
+  } catch (error) {
+    settings = previous;
+    anniversaryError.textContent = errorMessage(error);
+    anniversaryError.hidden = false;
+  }
+}
+
+function revealAnniversaryMessage(): void {
+  if (footerMessageShown) return;
+  footerMessageShown = true;
+  const days = anniversaryDayCount();
+  const message = settings.anniversaryDate && days !== null ? `Love Days: ${days}天` : "Self-Days";
+  footerName.classList.add("is-leaving");
+  footerNameFlourish.classList.add("is-leaving");
+  anniversaryPlant.setAttribute("aria-label", "小花的话已经出现");
+
+  const swapDelay = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 720;
+  window.setTimeout(() => {
+    footerName.textContent = message;
+    footerName.classList.remove("is-leaving");
+    footerName.classList.add("is-message", "is-entering");
+    footerName.classList.toggle("is-love-message", message.startsWith("Love Days"));
+    footerNameFlourish.classList.remove("is-leaving");
+    footerNameFlourish.classList.add("is-hidden");
+    footerDrawing.setAttribute("aria-label", `一本打开的书、一株新芽和手写字样 ${message}`);
+  }, swapDelay);
+}
+
 async function initialize(): Promise<void> {
   hydrateStaticIcons();
-  scheduleGreetingUpdate();
   const [appsResult, settingsResult] = await Promise.allSettled([
     invoke<AppShortcut[]>("load_apps"),
     invoke<AppSettings>("load_settings"),
   ]);
 
-  if (appsResult.status === "fulfilled") shortcuts = appsResult.value;
+  if (appsResult.status === "fulfilled") shortcuts = applyWeeklySchedules(appsResult.value, new Date().getDay());
   else showToast(errorMessage(appsResult.reason), true);
 
-  if (settingsResult.status === "fulfilled") settings = settingsResult.value;
+  if (settingsResult.status === "fulfilled") {
+    settings = { ...settingsResult.value, anniversaryDate: settingsResult.value.anniversaryDate ?? null };
+  }
   else showToast(errorMessage(settingsResult.reason), true);
 
+  scheduleGreetingUpdate();
   render();
   renderStartupSetting();
   renderThemeSetting();
@@ -990,6 +1242,15 @@ async function initialize(): Promise<void> {
 
 editButton.addEventListener("click", () => {
   editing = !editing;
+  if (editing) scheduling = false;
+  render();
+});
+scheduleButton.addEventListener("click", () => {
+  scheduling = !scheduling;
+  if (scheduling) {
+    editing = false;
+    sleepExpanded = true;
+  }
   render();
 });
 launchAllButton.addEventListener("click", () => void launchAll());
@@ -1001,6 +1262,7 @@ settingsButton.addEventListener("click", openSettings);
 settingsCloseButton.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
 signatureSettingButton.addEventListener("click", toggleSignatureEditor);
+anniversarySettingButton.addEventListener("click", toggleAnniversaryEditor);
 bulkSettingButton.addEventListener("click", toggleBulkEditor);
 themeSettingButton.addEventListener("click", toggleThemeEditor);
 guideSettingButton.addEventListener("click", () => openGuide());
@@ -1025,6 +1287,11 @@ signatureForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveSignature();
 });
+element<HTMLButtonElement>("anniversary-cancel-button").addEventListener("click", toggleAnniversaryEditor);
+anniversaryForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveAnniversary();
+});
 element<HTMLButtonElement>("empty-add-button").addEventListener("click", () => openEditor());
 browseButton.addEventListener("click", () => void chooseTarget());
 form.querySelectorAll<HTMLInputElement>('input[name="shortcut-kind"]').forEach((input) => {
@@ -1038,6 +1305,14 @@ form.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveFromForm();
 });
+element<HTMLButtonElement>("schedule-close-button").addEventListener("click", closeScheduleEditor);
+element<HTMLButtonElement>("schedule-cancel-button").addEventListener("click", closeScheduleEditor);
+scheduleRemoveButton.addEventListener("click", () => void removeSchedule());
+scheduleForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveSchedule();
+});
+anniversaryPlant.addEventListener("click", revealAnniversaryMessage);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && welcomeOpen) completeWelcome(false);
   else if (event.key === "Escape" && settingsPanel.classList.contains("is-open")) closeSettings();

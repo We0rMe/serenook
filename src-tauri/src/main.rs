@@ -72,6 +72,8 @@ struct AppShortcut {
     kind: ShortcutKind,
     #[serde(default)]
     sleeping: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wake_days: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -84,6 +86,8 @@ struct AppSettings {
     has_completed_welcome: bool,
     #[serde(default)]
     theme: ThemePreference,
+    #[serde(default)]
+    anniversary_date: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -106,6 +110,7 @@ impl Default for AppSettings {
             launch_on_startup: false,
             has_completed_welcome: false,
             theme: ThemePreference::System,
+            anniversary_date: None,
         }
     }
 }
@@ -368,6 +373,15 @@ fn validate_shortcuts(shortcuts: &[AppShortcut]) -> Result<(), String> {
         if !ALLOWED_ICONS.contains(&shortcut.icon.as_str()) {
             return Err("应用图标类型无效。".into());
         }
+        if let Some(wake_days) = &shortcut.wake_days {
+            let unique_days: HashSet<u8> = wake_days.iter().copied().collect();
+            if wake_days.len() > 7
+                || unique_days.len() != wake_days.len()
+                || wake_days.iter().any(|day| *day > 6)
+            {
+                return Err("应用作息中的星期设置无效。".into());
+            }
+        }
         match shortcut.kind {
             ShortcutKind::Local => {
                 validate_target(&shortcut.target, false)?;
@@ -381,10 +395,50 @@ fn validate_shortcuts(shortcuts: &[AppShortcut]) -> Result<(), String> {
     Ok(())
 }
 
+fn is_valid_calendar_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !bytes[0..4].iter().all(u8::is_ascii_digit)
+        || !bytes[5..7].iter().all(u8::is_ascii_digit)
+        || !bytes[8..10].iter().all(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    let Ok(year) = value[0..4].parse::<u32>() else {
+        return false;
+    };
+    let Ok(month) = value[5..7].parse::<u32>() else {
+        return false;
+    };
+    let Ok(day) = value[8..10].parse::<u32>() else {
+        return false;
+    };
+    if !(1900..=9999).contains(&year) || !(1..=12).contains(&month) {
+        return false;
+    }
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    (1..=days_in_month).contains(&day)
+}
+
 fn validate_settings(settings: &AppSettings) -> Result<(), String> {
     let length = settings.signature.trim().chars().count();
     if length == 0 || length > MAX_SIGNATURE_CHARACTERS {
         return Err(format!("签名应为 1 到 {MAX_SIGNATURE_CHARACTERS} 个字符。"));
+    }
+    if settings
+        .anniversary_date
+        .as_deref()
+        .is_some_and(|date| !is_valid_calendar_date(date))
+    {
+        return Err("纪念日日期无效。".into());
     }
     Ok(())
 }
@@ -736,6 +790,7 @@ mod tests {
             icon: "app".into(),
             kind: ShortcutKind::Local,
             sleeping: false,
+            wake_days: None,
         }
     }
 
@@ -785,6 +840,22 @@ mod tests {
         .unwrap();
         assert!(!shortcut.sleeping);
         assert_eq!(shortcut.kind, ShortcutKind::Local);
+        assert!(shortcut.wake_days.is_none());
+    }
+
+    #[test]
+    fn validates_weekly_wake_days() {
+        let mut valid = shortcut("valid", "Valid", r"C:\Tools\Valid.exe");
+        valid.wake_days = Some(vec![1, 3, 5]);
+        assert!(validate_shortcuts(&[valid]).is_ok());
+
+        let mut duplicate = shortcut("duplicate", "Duplicate", r"C:\Tools\Duplicate.exe");
+        duplicate.wake_days = Some(vec![1, 1]);
+        assert!(validate_shortcuts(&[duplicate]).is_err());
+
+        let mut out_of_range = shortcut("range", "Range", r"C:\Tools\Range.exe");
+        out_of_range.wake_days = Some(vec![7]);
+        assert!(validate_shortcuts(&[out_of_range]).is_err());
     }
 
     #[test]
@@ -795,8 +866,17 @@ mod tests {
             launch_on_startup: false,
             has_completed_welcome: false,
             theme: ThemePreference::System,
+            anniversary_date: None,
         })
         .is_err());
+    }
+
+    #[test]
+    fn validates_real_anniversary_dates() {
+        assert!(is_valid_calendar_date("2024-02-29"));
+        assert!(!is_valid_calendar_date("2023-02-29"));
+        assert!(!is_valid_calendar_date("2024-13-01"));
+        assert!(!is_valid_calendar_date("24-02-29"));
     }
 
     #[test]
@@ -805,6 +885,7 @@ mod tests {
         assert!(!settings.launch_on_startup);
         assert!(settings.has_completed_welcome);
         assert_eq!(settings.theme, ThemePreference::System);
+        assert!(settings.anniversary_date.is_none());
     }
 
     #[test]
