@@ -45,10 +45,24 @@ use windows::{
 
 const MAX_SHORTCUTS: usize = 40;
 const MAX_SIGNATURE_CHARACTERS: usize = 48;
+const MAX_ANNIVERSARY_NAME_CHARACTERS: usize = 7;
 const DEFAULT_SIGNATURE: &str = "慢一点，也是在向前。";
-const ALLOWED_EXTENSIONS: [&str; 8] = ["exe", "lnk", "bat", "cmd", "url", "txt", "csv", "xlsx"];
-const ALLOWED_ICONS: [&str; 7] = [
-    "app", "chat", "code", "compass", "folder", "document", "sheet",
+const DEFAULT_ANNIVERSARY_NAME: &str = "Love";
+const ALLOWED_EXTENSIONS: &[&str] = &[
+    "exe", "lnk", "bat", "cmd", "url", "txt", "md", "rtf", "pdf", "xps", "doc", "docx", "docm",
+    "odt", "wps", "csv", "xls", "xlsx", "xlsm", "ods", "et", "ppt", "pptx", "pptm", "odp", "dps",
+    "epub", "mobi", "one", "htm", "html",
+];
+const ALLOWED_ICONS: &[&str] = &[
+    "app",
+    "chat",
+    "code",
+    "compass",
+    "folder",
+    "document",
+    "sheet",
+    "pdf",
+    "presentation",
 ];
 const STARTUP_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const STARTUP_VALUE_NAME: &str = "Serenook";
@@ -59,6 +73,7 @@ enum ShortcutKind {
     #[default]
     Local,
     Web,
+    Folder,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -88,6 +103,8 @@ struct AppSettings {
     theme: ThemePreference,
     #[serde(default)]
     anniversary_date: Option<String>,
+    #[serde(default = "default_anniversary_name")]
+    anniversary_name: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -103,6 +120,10 @@ fn existing_user_has_completed_welcome() -> bool {
     true
 }
 
+fn default_anniversary_name() -> String {
+    DEFAULT_ANNIVERSARY_NAME.into()
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -111,6 +132,7 @@ impl Default for AppSettings {
             has_completed_welcome: false,
             theme: ThemePreference::System,
             anniversary_date: None,
+            anniversary_name: default_anniversary_name(),
         }
     }
 }
@@ -214,7 +236,7 @@ fn set_launch_on_startup(enabled: bool) -> Result<(), String> {
 fn validate_target(target: &str, require_exists: bool) -> Result<PathBuf, String> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
-        return Err("请选择应用程序文件。".into());
+        return Err("请选择本地文件。".into());
     }
 
     let path = PathBuf::from(trimmed);
@@ -229,11 +251,28 @@ fn validate_target(target: &str, require_exists: bool) -> Result<PathBuf, String
         .ok_or_else(|| "无法识别该文件类型。".to_string())?;
 
     if !ALLOWED_EXTENSIONS.contains(&extension.as_str()) {
-        return Err("仅支持 .exe、.lnk、.bat、.cmd、.url、.txt、.csv 和 .xlsx 文件。".into());
+        return Err("仅支持常见应用、快捷方式与文档文件。".into());
     }
 
     if require_exists && !path.is_file() {
-        return Err("找不到该应用程序，请在编辑模式中重新选择。".into());
+        return Err("找不到该文件，请在编辑模式中重新选择。".into());
+    }
+
+    Ok(path)
+}
+
+fn validate_folder_target(target: &str, require_exists: bool) -> Result<PathBuf, String> {
+    let trimmed = target.trim();
+    if trimmed.is_empty() {
+        return Err("请选择本地文件夹。".into());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.is_absolute() {
+        return Err("文件夹位置必须是绝对路径。".into());
+    }
+    if require_exists && !path.is_dir() {
+        return Err("找不到该文件夹，请在编辑模式中重新选择。".into());
     }
 
     Ok(path)
@@ -358,20 +397,20 @@ fn detect_running_apps(targets: Vec<String>) -> Result<Vec<String>, String> {
 
 fn validate_shortcuts(shortcuts: &[AppShortcut]) -> Result<(), String> {
     if shortcuts.len() > MAX_SHORTCUTS {
-        return Err(format!("最多可以保存 {MAX_SHORTCUTS} 个应用。"));
+        return Err(format!("最多可以保存 {MAX_SHORTCUTS} 个入口。"));
     }
 
     let mut ids = HashSet::with_capacity(shortcuts.len());
     for shortcut in shortcuts {
         let name = shortcut.name.trim();
         if shortcut.id.trim().is_empty() || !ids.insert(shortcut.id.as_str()) {
-            return Err("应用标识无效或重复。".into());
+            return Err("入口标识无效或重复。".into());
         }
         if name.is_empty() || name.chars().count() > 64 {
-            return Err("应用名称应为 1 到 64 个字符。".into());
+            return Err("入口名称应为 1 到 64 个字符。".into());
         }
         if !ALLOWED_ICONS.contains(&shortcut.icon.as_str()) {
-            return Err("应用图标类型无效。".into());
+            return Err("入口图标类型无效。".into());
         }
         if let Some(wake_days) = &shortcut.wake_days {
             let unique_days: HashSet<u8> = wake_days.iter().copied().collect();
@@ -379,7 +418,7 @@ fn validate_shortcuts(shortcuts: &[AppShortcut]) -> Result<(), String> {
                 || unique_days.len() != wake_days.len()
                 || wake_days.iter().any(|day| *day > 6)
             {
-                return Err("应用作息中的星期设置无效。".into());
+                return Err("入口作息中的星期设置无效。".into());
             }
         }
         match shortcut.kind {
@@ -388,6 +427,9 @@ fn validate_shortcuts(shortcuts: &[AppShortcut]) -> Result<(), String> {
             }
             ShortcutKind::Web => {
                 validate_web_url(&shortcut.target)?;
+            }
+            ShortcutKind::Folder => {
+                validate_folder_target(&shortcut.target, false)?;
             }
         }
     }
@@ -439,6 +481,17 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
         .is_some_and(|date| !is_valid_calendar_date(date))
     {
         return Err("纪念日日期无效。".into());
+    }
+    let anniversary_name = settings.anniversary_name.trim();
+    if anniversary_name.is_empty()
+        || anniversary_name.len() > MAX_ANNIVERSARY_NAME_CHARACTERS
+        || !anniversary_name
+            .bytes()
+            .all(|character| character.is_ascii_alphabetic())
+    {
+        return Err(format!(
+            "纪念日名称应为 1 到 {MAX_ANNIVERSARY_NAME_CHARACTERS} 个英文字母。"
+        ));
     }
     Ok(())
 }
@@ -723,6 +776,7 @@ fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
 #[tauri::command]
 fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<(), String> {
     settings.signature = settings.signature.trim().to_string();
+    settings.anniversary_name = settings.anniversary_name.trim().to_string();
     validate_settings(&settings)?;
     set_launch_on_startup(settings.launch_on_startup)?;
     let content = serde_json::to_string_pretty(&settings)
@@ -741,23 +795,26 @@ fn get_app_icon(target: String, kind: ShortcutKind) -> Result<Option<String>, St
             };
             path
         }
+        ShortcutKind::Folder => {
+            validate_folder_target(&target, true)?;
+            return Ok(None);
+        }
     };
     Ok(extract_icon_data_url(&path).ok())
 }
 
 #[tauri::command]
 fn launch_app(target: String, kind: ShortcutKind) -> Result<(), String> {
-    match kind {
-        ShortcutKind::Local => {
-            let path = validate_target(&target, true)?;
-            Command::new("explorer.exe")
-                .arg(path)
-                .spawn()
-                .map(|_| ())
-                .map_err(|error| format!("无法启动应用：{error}"))
-        }
-        ShortcutKind::Web => open_web_url(&target),
-    }
+    let path = match kind {
+        ShortcutKind::Local => validate_target(&target, true)?,
+        ShortcutKind::Folder => validate_folder_target(&target, true)?,
+        ShortcutKind::Web => return open_web_url(&target),
+    };
+    Command::new("explorer.exe")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("无法打开这个入口：{error}"))
 }
 
 fn main() {
@@ -801,12 +858,21 @@ mod tests {
         assert!(validate_target(r"D:\Notes\Example.txt", false).is_ok());
         assert!(validate_target(r"D:\Notes\Example.csv", false).is_ok());
         assert!(validate_target(r"D:\Notes\Example.xlsx", false).is_ok());
+        assert!(validate_target(r"D:\Notes\Example.docx", false).is_ok());
+        assert!(validate_target(r"D:\Notes\Example.pdf", false).is_ok());
+        assert!(validate_target(r"D:\Notes\Example.pptx", false).is_ok());
     }
 
     #[test]
     fn rejects_relative_or_unsupported_paths() {
         assert!(validate_target(r"Tools\Example.exe", false).is_err());
-        assert!(validate_target(r"C:\Tools\Example.pdf", false).is_err());
+        assert!(validate_target(r"C:\Tools\Example.zip", false).is_err());
+    }
+
+    #[test]
+    fn accepts_only_absolute_folder_paths() {
+        assert!(validate_folder_target(r"C:\Users\Example\Documents", false).is_ok());
+        assert!(validate_folder_target(r"Documents", false).is_err());
     }
 
     #[test]
@@ -867,8 +933,22 @@ mod tests {
             has_completed_welcome: false,
             theme: ThemePreference::System,
             anniversary_date: None,
+            anniversary_name: default_anniversary_name(),
         })
         .is_err());
+    }
+
+    #[test]
+    fn validates_anniversary_names() {
+        let mut settings = AppSettings::default();
+        settings.anniversary_name = "Birth".into();
+        assert!(validate_settings(&settings).is_ok());
+
+        settings.anniversary_name = "TooLongName".into();
+        assert!(validate_settings(&settings).is_err());
+
+        settings.anniversary_name = "Dog 1".into();
+        assert!(validate_settings(&settings).is_err());
     }
 
     #[test]
@@ -886,6 +966,7 @@ mod tests {
         assert!(settings.has_completed_welcome);
         assert_eq!(settings.theme, ThemePreference::System);
         assert!(settings.anniversary_date.is_none());
+        assert_eq!(settings.anniversary_name, DEFAULT_ANNIVERSARY_NAME);
     }
 
     #[test]

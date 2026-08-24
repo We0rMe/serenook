@@ -51,11 +51,11 @@
           </div>
         </section>
 
-        <section id="shortcut-grid" class="shortcut-grid" aria-label="应用快捷启动"></section>
+        <section id="shortcut-grid" class="shortcut-grid" aria-label="常用入口"></section>
 
         <section id="empty-state" class="empty-state" hidden>
           <span class="empty-icon" data-icon="sparkles" aria-hidden="true"></span>
-          <p>这里还很安静，放入第一个常用应用吧。</p>
+          <p>这里还很安静，放入第一个常用入口吧。</p>
           <button id="empty-add-button" class="primary-button" type="button">添加应用</button>
         </section>
 
@@ -68,7 +68,7 @@
           </button>
           <div id="sleep-content" class="sleep-content" aria-hidden="true" inert>
             <div class="sleep-content-inner">
-              <div id="sleep-grid" class="shortcut-grid sleep-grid" aria-label="睡眠中的应用"></div>
+              <div id="sleep-grid" class="shortcut-grid sleep-grid" aria-label="睡眠中的入口"></div>
             </div>
           </div>
         </section>
@@ -156,8 +156,11 @@
           </button>
           <div id="anniversary-editor" class="signature-editor" aria-hidden="true" inert>
             <div class="signature-editor-inner">
-              <form id="anniversary-form" class="signature-form anniversary-form">
-                <p class="anniversary-copy">选好第一天，轻点主页左下角的小花。</p>
+              <form id="anniversary-form" class="signature-form anniversary-form" novalidate>
+                <p class="anniversary-copy">给这段日子一个名字，再记下第一天。</p>
+                <label for="anniversary-name-input">纪念日名称</label>
+                <input id="anniversary-name-input" type="text" maxlength="7" pattern="[A-Za-z]{1,7}" placeholder="Love" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="anniversary-name-hint" title="请输入 1–7 个英文字母" required />
+                <p id="anniversary-name-hint" class="field-hint anniversary-name-hint">1–7 个英文字母，如 Love、Birth 或 Dog</p>
                 <label for="anniversary-input">纪念日的第一天</label>
                 <input id="anniversary-input" type="date" min="1900-01-01" required />
                 <p id="anniversary-error" class="form-error" role="alert" hidden></p>
@@ -259,7 +262,7 @@
               <span class="guide-number">01</span>
               <div>
                 <h3>一处安静的小角落</h3>
-                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。它不试图接管你的工作，只将应用、网页和文档轻轻收在一起，在需要时，为你打开通往下一件事的门。</p>
+                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。它只把常用入口轻轻收在一起，需要时，为你打开通往下一件事的门。</p>
               </div>
             </article>
 
@@ -267,7 +270,7 @@
               <span class="guide-number">02</span>
               <div>
                 <h3>放入与打开</h3>
-                <p>进入“编辑”，添加本地应用、在线网址或常用文档。轻点卡片即可打开；“全开”会避开睡眠中与已经运行的应用，并依次启动其余入口。</p>
+                <p>进入“编辑”，添加应用、文档、文件夹或网址。轻点卡片即可打开；“全开”会避开睡眠中与已运行的应用，依次打开其余入口。</p>
               </div>
             </article>
 
@@ -283,7 +286,7 @@
               <span class="guide-number">04</span>
               <div>
                 <h3>慢慢熟悉彼此</h3>
-                <p>你可以修改签名、选择是否随电脑启动，也可以随使用习惯逐步整理入口。Serenook 的理想状态，是安静地待在一旁，却越来越懂得你的节奏。</p>
+                <p>你可以修改签名、明暗与启动方式，也能为纪念日取一个英文短名。保存日期后，轻点主页左下角的小花，看看一起走过的日子。</p>
               </div>
             </article>
           </div>
@@ -302,7 +305,7 @@
         <header class="dialog-heading">
           <div>
             <span class="dialog-kicker">SHORTCUT</span>
-            <h2 id="dialog-title">添加一个应用</h2>
+            <h2 id="dialog-title">添加一个入口</h2>
           </div>
           <button id="dialog-close-button" class="dialog-close-button" type="button" aria-label="关闭">
             <span data-icon="close" aria-hidden="true"></span>
@@ -315,11 +318,15 @@
           <legend>类型</legend>
           <label class="kind-option">
             <input type="radio" name="shortcut-kind" value="local" checked />
-            <span>本地应用</span>
+            <span>应用 / 文档</span>
           </label>
           <label class="kind-option">
             <input type="radio" name="shortcut-kind" value="web" />
             <span>在线网址</span>
+          </label>
+          <label class="kind-option">
+            <input type="radio" name="shortcut-kind" value="folder" />
+            <span>本地文件夹</span>
           </label>
         </fieldset>
 
@@ -331,7 +338,7 @@
           <input id="shortcut-target" type="text" readonly autocomplete="off" required />
           <button id="browse-button" class="secondary-button" type="button">浏览…</button>
         </div>
-        <p id="target-hint" class="field-hint">支持应用、快捷方式与常用文档</p>
+        <p id="target-hint" class="field-hint">支持常见应用与文档</p>
 
         <p id="form-error" class="form-error" role="alert" hidden></p>
 

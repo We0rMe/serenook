@@ -737,9 +737,19 @@ h1 {
   stroke-dashoffset: 360;
 }
 
-.handwritten-name.is-love-message {
+.handwritten-name.is-anniversary-message {
   font-size: 14px;
   letter-spacing: -0.045em;
+}
+
+.handwritten-name.is-compact-message {
+  font-size: 12.5px;
+}
+
+.handwritten-name.is-message:not(.is-entering) {
+  animation: none;
+  fill-opacity: 0.88;
+  stroke-dashoffset: 0;
 }
 
 .handwritten-name.is-entering {
@@ -995,7 +1005,7 @@ h1 {
   margin: 0 0 17px;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
   border: 0;
 }
@@ -1406,6 +1416,15 @@ h1 {
   font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
   font-size: 12px;
   line-height: 1.7;
+}
+
+.anniversary-form label:not(:first-of-type) {
+  margin-top: 13px;
+}
+
+.anniversary-name-hint {
+  margin-top: 6px;
+  line-height: 1.5;
 }
 
 .signature-form input {

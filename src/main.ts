@@ -5,8 +5,8 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import "./styles.css";
 
-type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet";
-type ShortcutKind = "local" | "web";
+type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet" | "pdf" | "presentation";
+type ShortcutKind = "local" | "web" | "folder";
 type ThemePreference = "system" | "light" | "dark";
 
 interface AppShortcut {
@@ -25,9 +25,12 @@ interface AppSettings {
   hasCompletedWelcome: boolean;
   theme: ThemePreference;
   anniversaryDate: string | null;
+  anniversaryName: string;
 }
 
 const DEFAULT_SIGNATURE = "慢一点，也是在向前。";
+const DEFAULT_ANNIVERSARY_NAME = "Love";
+const MAX_ANNIVERSARY_NAME_LENGTH = 7;
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
 const MILLISECONDS_PER_DAY = 86_400_000;
@@ -61,8 +64,21 @@ const GREETING_BOUNDARIES = [
   { hour: 20, minute: 30 },
   { hour: 24, minute: 0 },
 ];
+const LOCAL_FILE_EXTENSIONS = [
+  "exe", "lnk", "bat", "cmd", "url",
+  "txt", "md", "rtf", "pdf", "xps", "doc", "docx", "docm", "odt", "wps",
+  "csv", "xls", "xlsx", "xlsm", "ods", "et",
+  "ppt", "pptx", "pptm", "odp", "dps",
+  "epub", "mobi", "one", "htm", "html",
+];
+const DOCUMENT_EXTENSIONS = new Set(LOCAL_FILE_EXTENSIONS.slice(5));
+const SHEET_EXTENSIONS = new Set(["csv", "xls", "xlsx", "xlsm", "ods", "et"]);
+const PRESENTATION_EXTENSIONS = new Set(["ppt", "pptx", "pptm", "odp", "dps"]);
+const PDF_EXTENSIONS = new Set(["pdf", "xps"]);
 const FILE_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path d="M9.25 12h5.5M9.25 15.5h4"/></svg>';
 const SHEET_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path class="sheet-grid" d="M9 11h6v6H9zM9 14h6M12 11v6"/></svg>';
+const PDF_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M6.75 3.5h7l3.5 3.5v13.5H6.75v-17Z"/><path d="M13.75 3.5V7h3.5"/><path d="M9 16.5c1.8-2.7 3-5.3 3-7.7 0 3 1.2 5.2 3.2 6.5-2.4-.6-4.5-.3-6.2 1.2Z"/></svg>';
+const PRESENTATION_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M5.5 4.5h13v11h-13zM12 15.5v4M9.5 19.5h5"/><path d="M9 8h3v3H9zM12 8a3 3 0 0 1 3 3h-3V8Z"/></svg>';
 
 const ICONS: Record<string, string> = {
   app: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>',
@@ -85,6 +101,8 @@ const ICONS: Record<string, string> = {
   layers: '<svg viewBox="0 0 24 24"><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 16l8 4 8-4"/></svg>',
   document: FILE_ICON_SVG,
   sheet: SHEET_ICON_SVG,
+  pdf: PDF_ICON_SVG,
+  presentation: PRESENTATION_ICON_SVG,
   book: '<svg viewBox="0 0 24 24"><path d="M4 5.5c3.2-.8 5.8-.2 8 1.7v12c-2.2-1.9-4.8-2.5-8-1.7v-12Z"/><path d="M20 5.5c-3.2-.8-5.8-.2-8 1.7v12c2.2-1.9 4.8-2.5 8-1.7v-12Z"/></svg>',
   arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></svg>',
   back: '<svg viewBox="0 0 24 24"><path d="M19 12H5M10 7l-5 5 5 5"/></svg>',
@@ -137,6 +155,7 @@ const signatureText = element<HTMLElement>("signature-text");
 const anniversarySettingButton = element<HTMLButtonElement>("anniversary-setting-button");
 const anniversaryEditor = element<HTMLElement>("anniversary-editor");
 const anniversaryForm = element<HTMLFormElement>("anniversary-form");
+const anniversaryNameInput = element<HTMLInputElement>("anniversary-name-input");
 const anniversaryInput = element<HTMLInputElement>("anniversary-input");
 const anniversaryError = element<HTMLElement>("anniversary-error");
 const bulkSettingButton = element<HTMLButtonElement>("bulk-setting-button");
@@ -179,6 +198,7 @@ let settings: AppSettings = {
   hasCompletedWelcome: false,
   theme: "system",
   anniversaryDate: null,
+  anniversaryName: DEFAULT_ANNIVERSARY_NAME,
 };
 const appIcons = new Map<string, string | null>();
 const runningTargets = new Set<string>();
@@ -219,7 +239,9 @@ function hydrateStaticIcons(): void {
 }
 
 function shortcutKind(shortcut: AppShortcut): ShortcutKind {
-  return shortcut.kind === "web" ? "web" : "local";
+  if (shortcut.kind === "web") return "web";
+  if (shortcut.kind === "folder") return "folder";
+  return "local";
 }
 
 function iconCacheKey(shortcut: AppShortcut): string {
@@ -236,20 +258,25 @@ function isShortcutRunning(shortcut: AppShortcut): boolean {
 
 function selectedShortcutKind(): ShortcutKind {
   const selected = form.querySelector<HTMLInputElement>('input[name="shortcut-kind"]:checked');
-  return selected?.value === "web" ? "web" : "local";
+  if (selected?.value === "web") return "web";
+  if (selected?.value === "folder") return "folder";
+  return "local";
 }
 
 function setTargetMode(kind: ShortcutKind, clearTarget = false): void {
   if (clearTarget) targetInput.value = "";
   const isWeb = kind === "web";
+  const isFolder = kind === "folder";
   targetInput.readOnly = !isWeb;
   targetInput.placeholder = isWeb ? "https://example.com" : "";
   browseButton.hidden = isWeb;
   targetRow.classList.toggle("is-web", isWeb);
-  targetLabel.textContent = isWeb ? "网址" : "程序位置";
+  targetLabel.textContent = isWeb ? "网址" : isFolder ? "文件夹位置" : "程序位置";
   targetHint.textContent = isWeb
-    ? "请输入以 http:// 或 https:// 开头的完整网址"
-    : "支持应用、快捷方式以及 .txt、.csv、.xlsx 文档";
+    ? "请输入以 http:// 或 https:// 开头的网址"
+    : isFolder
+      ? "选择一个常用文件夹"
+      : "支持常见应用与文档";
 }
 
 function isoDateForInput(date = new Date()): string {
@@ -285,6 +312,7 @@ function anniversaryDayCount(now = new Date()): number | null {
 }
 
 function specialAnniversaryGreeting(now = new Date()): string | null {
+  if (settings.anniversaryName.toLowerCase() !== DEFAULT_ANNIVERSARY_NAME.toLowerCase()) return null;
   const days = anniversaryDayCount(now);
   return days === null ? null : SPECIAL_ANNIVERSARY_GREETINGS[days] ?? null;
 }
@@ -366,11 +394,28 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function targetExtension(target: string): string | null {
+  return target.match(/\.([^.\\/]+)$/)?.[1]?.toLowerCase() ?? null;
+}
+
+function fileIconForTarget(target: string): string | null {
+  const extension = targetExtension(target);
+  if (!extension || !DOCUMENT_EXTENSIONS.has(extension)) return null;
+  if (SHEET_EXTENSIONS.has(extension)) return SHEET_ICON_SVG;
+  if (PRESENTATION_EXTENSIONS.has(extension)) return PRESENTATION_ICON_SVG;
+  if (PDF_EXTENSIONS.has(extension)) return PDF_ICON_SVG;
+  return FILE_ICON_SVG;
+}
+
 function inferIcon(name: string, target: string, kind: ShortcutKind): IconName {
   if (kind === "web") return "compass";
+  if (kind === "folder") return "folder";
   const value = `${name} ${target}`.toLowerCase();
-  if (/\.(csv|xlsx)$/i.test(target)) return "sheet";
-  if (/\.txt$/i.test(target)) return "document";
+  const extension = targetExtension(target);
+  if (extension && SHEET_EXTENSIONS.has(extension)) return "sheet";
+  if (extension && PRESENTATION_EXTENSIONS.has(extension)) return "presentation";
+  if (extension && PDF_EXTENSIONS.has(extension)) return "pdf";
+  if (extension && DOCUMENT_EXTENSIONS.has(extension)) return "document";
   if (/(wechat|微信|qq|telegram|slack|teams)/.test(value)) return "chat";
   if (/(code|studio|idea|pycharm|webstorm|dev)/.test(value)) return "code";
   if (/(chrome|edge|firefox|browser|浏览器)/.test(value)) return "compass";
@@ -378,13 +423,10 @@ function inferIcon(name: string, target: string, kind: ShortcutKind): IconName {
   return "app";
 }
 
-function fileTypeMarker(shortcut: AppShortcut): "TXT" | "CSV" | "XLSX" | null {
+function fileTypeMarker(shortcut: AppShortcut): string | null {
   if (shortcutKind(shortcut) !== "local") return null;
-  const extension = shortcut.target.match(/\.([^.\\/]+)$/)?.[1]?.toLowerCase();
-  if (extension === "txt") return "TXT";
-  if (extension === "csv") return "CSV";
-  if (extension === "xlsx") return "XLSX";
-  return null;
+  const extension = targetExtension(shortcut.target);
+  return extension && DOCUMENT_EXTENSIONS.has(extension) ? extension.toUpperCase() : null;
 }
 
 function showToast(message: string, isError = false): void {
@@ -403,6 +445,7 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   const card = document.createElement("button");
   const kind = shortcutKind(shortcut);
   const fileMarker = fileTypeMarker(shortcut);
+  const fileIconSvg = kind === "local" ? fileIconForTarget(shortcut.target) : null;
   const running = isShortcutRunning(shortcut);
   card.type = "button";
   card.className = `shortcut-card icon-${shortcut.icon}`;
@@ -424,13 +467,13 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
 
   const iconHolder = document.createElement("span");
   iconHolder.className = "app-icon";
-  const usesBuiltInFileIcon = fileMarker !== null || shortcut.icon === "document" || shortcut.icon === "sheet";
-  const iconData = usesBuiltInFileIcon ? null : appIcons.get(iconCacheKey(shortcut));
-  if (usesBuiltInFileIcon) {
+  const iconData = (fileIconSvg || kind === "folder") ? null : appIcons.get(iconCacheKey(shortcut));
+  if (fileIconSvg) {
     iconHolder.classList.add("is-file-icon");
-    iconHolder.innerHTML = shortcut.icon === "sheet" || fileMarker === "CSV" || fileMarker === "XLSX"
-      ? SHEET_ICON_SVG
-      : FILE_ICON_SVG;
+    iconHolder.innerHTML = fileIconSvg;
+  } else if (kind === "folder") {
+    iconHolder.classList.add("is-fallback");
+    iconHolder.append(icon("folder"));
   } else if (iconData) {
     const image = document.createElement("img");
     image.className = "app-icon-image";
@@ -509,7 +552,7 @@ function createAddCard(): HTMLElement {
   name.textContent = "添加应用";
   const hint = document.createElement("span");
   hint.className = "shortcut-hint";
-  hint.textContent = "本地应用或在线网址";
+  hint.textContent = "应用、文档、文件夹或网址";
   card.append(iconHolder, name, hint);
   card.addEventListener("click", () => openEditor());
   return card;
@@ -590,7 +633,7 @@ async function launchAll(): Promise<void> {
     launchingAll = false;
     render();
   }
-  if (failed > 0) showToast(`有 ${failed} 个应用未能打开。`, true);
+  if (failed > 0) showToast(`有 ${failed} 个入口未能打开。`, true);
   window.setTimeout(() => void refreshRunningApps(), 800);
 }
 
@@ -625,7 +668,7 @@ async function refreshRunningApps(initial = false): Promise<void> {
 async function hydrateAppIcons(items: AppShortcut[]): Promise<void> {
   const keys = new Set<string>();
   const pending = items.filter((shortcut) => {
-    if (shortcut.icon === "document" || shortcut.icon === "sheet") return false;
+    if (shortcutKind(shortcut) === "folder" || fileIconForTarget(shortcut.target)) return false;
     const key = iconCacheKey(shortcut);
     if (appIcons.has(key) || keys.has(key)) return false;
     keys.add(key);
@@ -703,18 +746,22 @@ function closeEditor(): void {
 }
 
 async function chooseTarget(): Promise<void> {
-  if (selectedShortcutKind() !== "local") return;
-  const selected = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: "应用与文档", extensions: ["exe", "lnk", "bat", "cmd", "url", "txt", "csv", "xlsx"] }],
-  });
+  const kind = selectedShortcutKind();
+  if (kind === "web") return;
+  const selected = await open(kind === "folder"
+    ? { multiple: false, directory: true }
+    : {
+        multiple: false,
+        directory: false,
+        filters: [{ name: "应用与文档", extensions: LOCAL_FILE_EXTENSIONS }],
+      });
   if (typeof selected !== "string") return;
 
   targetInput.value = selected;
   if (!nameInput.value.trim()) {
-    const filename = selected.split(/[\\/]/).pop() ?? "新应用";
-    nameInput.value = filename.replace(/\.(exe|lnk|bat|cmd|url|txt|csv|xlsx)$/i, "");
+    const filename = selected.replace(/[\\/]+$/, "").split(/[\\/]/).pop()
+      ?? (kind === "folder" ? "新文件夹" : "新入口");
+    nameInput.value = kind === "folder" ? filename : filename.replace(/\.[^.]+$/, "");
   }
   formError.hidden = true;
 }
@@ -724,7 +771,11 @@ async function saveFromForm(): Promise<void> {
   const target = targetInput.value.trim();
   const kind = selectedShortcutKind();
   if (!name || !target) {
-    formError.textContent = kind === "web" ? "请填写名称和完整网址。" : "请填写名称并选择程序文件。";
+    formError.textContent = kind === "web"
+      ? "请填写名称和完整网址。"
+      : kind === "folder"
+        ? "请填写名称并选择文件夹。"
+        : "请填写名称并选择本地文件。";
     formError.hidden = false;
     return;
   }
@@ -929,8 +980,12 @@ function toggleAnniversaryEditor(): void {
   anniversaryError.hidden = true;
   if (opening) {
     anniversaryInput.max = isoDateForInput();
+    anniversaryNameInput.value = settings.anniversaryName;
     anniversaryInput.value = settings.anniversaryDate ?? "";
-    window.setTimeout(() => anniversaryInput.focus(), 0);
+    window.setTimeout(() => {
+      anniversaryNameInput.focus();
+      anniversaryNameInput.select();
+    }, 0);
   }
 }
 
@@ -1170,6 +1225,12 @@ async function saveSignature(): Promise<void> {
 }
 
 async function saveAnniversary(): Promise<void> {
+  const anniversaryName = anniversaryNameInput.value.trim();
+  if (!new RegExp(`^[A-Za-z]{1,${MAX_ANNIVERSARY_NAME_LENGTH}}$`).test(anniversaryName)) {
+    anniversaryError.textContent = `名称请使用 1–${MAX_ANNIVERSARY_NAME_LENGTH} 个英文字母。`;
+    anniversaryError.hidden = false;
+    return;
+  }
   const anniversaryDate = anniversaryInput.value;
   const instant = calendarDateInstant(anniversaryDate);
   const today = calendarDateInstant(isoDateForInput());
@@ -1180,12 +1241,13 @@ async function saveAnniversary(): Promise<void> {
   }
 
   const previous = settings;
-  settings = { ...settings, anniversaryDate };
+  settings = { ...settings, anniversaryDate, anniversaryName };
   try {
     await invoke("save_settings", { settings });
     setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
+    if (footerMessageShown) placeFooterMessage(anniversaryMessage(), false);
     scheduleGreetingUpdate();
-    showToast("第一天已经好好记下");
+    showToast(`${anniversaryName} 的第一天已经记下`);
   } catch (error) {
     settings = previous;
     anniversaryError.textContent = errorMessage(error);
@@ -1193,24 +1255,37 @@ async function saveAnniversary(): Promise<void> {
   }
 }
 
+function anniversaryMessage(): string {
+  const days = anniversaryDayCount();
+  return settings.anniversaryDate && days !== null
+    ? `${settings.anniversaryName} Days: ${days}天`
+    : "Self-Days";
+}
+
+function placeFooterMessage(message: string, animate: boolean): void {
+  footerName.textContent = message;
+  footerName.setAttribute("x", "85");
+  footerName.setAttribute("text-anchor", "middle");
+  footerName.classList.remove("is-leaving");
+  footerName.classList.add("is-message");
+  footerName.classList.toggle("is-entering", animate);
+  footerName.classList.toggle("is-anniversary-message", message !== "Self-Days");
+  footerName.classList.toggle("is-compact-message", [...message].length > 18);
+  footerNameFlourish.classList.remove("is-leaving");
+  footerNameFlourish.classList.add("is-hidden");
+  footerDrawing.setAttribute("aria-label", `一本打开的书、一株新芽和手写字样 ${message}`);
+}
+
 function revealAnniversaryMessage(): void {
   if (footerMessageShown) return;
   footerMessageShown = true;
-  const days = anniversaryDayCount();
-  const message = settings.anniversaryDate && days !== null ? `Love Days: ${days}天` : "Self-Days";
   footerName.classList.add("is-leaving");
   footerNameFlourish.classList.add("is-leaving");
   anniversaryPlant.setAttribute("aria-label", "小花的话已经出现");
 
   const swapDelay = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 720;
   window.setTimeout(() => {
-    footerName.textContent = message;
-    footerName.classList.remove("is-leaving");
-    footerName.classList.add("is-message", "is-entering");
-    footerName.classList.toggle("is-love-message", message.startsWith("Love Days"));
-    footerNameFlourish.classList.remove("is-leaving");
-    footerNameFlourish.classList.add("is-hidden");
-    footerDrawing.setAttribute("aria-label", `一本打开的书、一株新芽和手写字样 ${message}`);
+    placeFooterMessage(anniversaryMessage(), true);
   }, swapDelay);
 }
 
@@ -1225,7 +1300,11 @@ async function initialize(): Promise<void> {
   else showToast(errorMessage(appsResult.reason), true);
 
   if (settingsResult.status === "fulfilled") {
-    settings = { ...settingsResult.value, anniversaryDate: settingsResult.value.anniversaryDate ?? null };
+    settings = {
+      ...settingsResult.value,
+      anniversaryDate: settingsResult.value.anniversaryDate ?? null,
+      anniversaryName: settingsResult.value.anniversaryName?.trim() || DEFAULT_ANNIVERSARY_NAME,
+    };
   }
   else showToast(errorMessage(settingsResult.reason), true);
 
@@ -1288,6 +1367,18 @@ signatureForm.addEventListener("submit", (event) => {
   void saveSignature();
 });
 element<HTMLButtonElement>("anniversary-cancel-button").addEventListener("click", toggleAnniversaryEditor);
+anniversaryNameInput.addEventListener("input", () => {
+  const lettersOnly = anniversaryNameInput.value
+    .replace(/[^A-Za-z]/g, "")
+    .slice(0, MAX_ANNIVERSARY_NAME_LENGTH);
+  if (lettersOnly !== anniversaryNameInput.value) {
+    anniversaryNameInput.value = lettersOnly;
+    anniversaryError.textContent = `名称仅支持 1–${MAX_ANNIVERSARY_NAME_LENGTH} 个英文字母。`;
+    anniversaryError.hidden = false;
+  } else {
+    anniversaryError.hidden = true;
+  }
+});
 anniversaryForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveAnniversary();
