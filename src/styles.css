@@ -1660,12 +1660,15 @@ h1 {
 }
 
 .update-notes {
-  max-height: 128px;
-  margin: 13px 0 0;
+  max-width: 360px;
+  max-height: 154px;
+  margin: 17px auto 0;
+  padding: 0 2px;
   overflow-y: auto;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.75;
+  text-align: left;
   white-space: pre-line;
 }
 
