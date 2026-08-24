@@ -1138,7 +1138,7 @@ async function checkForUpdates(): Promise<void> {
     if (!update) return;
     availableUpdate = update;
     updateVersion.textContent = `Serenook ${update.version}`;
-    updateNotes.textContent = update.body?.trim() || "这一版带来了一些安静而细小的改进。";
+    renderUpdateNotes(update.body?.trim() || "这一版带来了一些安静而细小的改进。");
     updateStatus.textContent = "准备好时，可以在这里完成更新。";
     updateInstallButton.disabled = false;
     updateLaterButton.disabled = false;
@@ -1146,6 +1146,34 @@ async function checkForUpdates(): Promise<void> {
   } catch (error) {
     console.info("Update check unavailable", error);
   }
+}
+
+function renderUpdateNotes(notes: string): void {
+  const content: HTMLElement[] = [];
+  let list: HTMLDivElement | undefined;
+
+  for (const line of notes.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
+    if (line.startsWith("•")) {
+      if (!list) {
+        list = document.createElement("div");
+        list.className = "update-note-list";
+        content.push(list);
+      }
+      const item = document.createElement("p");
+      item.className = "update-note-line";
+      item.textContent = line;
+      list.append(item);
+      continue;
+    }
+
+    list = undefined;
+    const copy = document.createElement("p");
+    copy.className = "update-note-copy";
+    copy.textContent = line;
+    content.push(copy);
+  }
+
+  updateNotes.replaceChildren(...content);
 }
 
 function closeUpdateDialog(): void {

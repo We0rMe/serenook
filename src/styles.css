@@ -1660,7 +1660,7 @@ h1 {
 }
 
 .update-notes {
-  max-width: 360px;
+  max-width: 380px;
   max-height: 154px;
   margin: 17px auto 0;
   padding: 0 2px;
@@ -1668,8 +1668,26 @@ h1 {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.75;
+  text-align: center;
+}
+
+.update-note-copy,
+.update-note-line {
+  margin: 0;
+}
+
+.update-note-list {
+  width: fit-content;
+  max-width: 100%;
+  margin: 9px auto 0;
+  display: grid;
+  gap: 2px;
   text-align: left;
-  white-space: pre-line;
+}
+
+.update-note-list + .update-note-copy,
+.update-note-copy + .update-note-copy {
+  margin-top: 9px;
 }
 
 .update-status {
