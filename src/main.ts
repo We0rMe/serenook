@@ -3,6 +3,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import { dailyQuote } from "./daily-quotes";
+import { holidayForDate, holidayGreeting } from "./holiday-greetings";
 import "./styles.css";
 
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet" | "pdf" | "presentation";
@@ -20,7 +22,6 @@ interface AppShortcut {
 }
 
 interface AppSettings {
-  signature: string;
   launchOnStartup: boolean;
   hasCompletedWelcome: boolean;
   theme: ThemePreference;
@@ -28,7 +29,6 @@ interface AppSettings {
   anniversaryName: string;
 }
 
-const DEFAULT_SIGNATURE = "慢一点，也是在向前。";
 const DEFAULT_ANNIVERSARY_NAME = "Love";
 const MAX_ANNIVERSARY_NAME_LENGTH = 7;
 const LAUNCH_INTERVAL_MS = 650;
@@ -97,7 +97,6 @@ const ICONS: Record<string, string> = {
   chevron: '<svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
   moon: '<svg viewBox="0 0 24 24"><path d="M19 15.5A8 8 0 0 1 8.5 5 8 8 0 1 0 19 15.5Z"/></svg>',
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>',
-  signature: '<svg viewBox="0 0 24 24"><path d="M4 17c3-6 5-9 7-9 3 0-1 8 2 8 2 0 3-4 5-4 1.5 0 .3 4 2 4"/><path d="M4 20h16"/></svg>',
   layers: '<svg viewBox="0 0 24 24"><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 16l8 4 8-4"/></svg>',
   document: FILE_ICON_SVG,
   sheet: SHEET_ICON_SVG,
@@ -146,12 +145,7 @@ const settingsButton = element<HTMLButtonElement>("settings-button");
 const settingsCloseButton = element<HTMLButtonElement>("settings-close-button");
 const settingsBackdrop = element<HTMLElement>("settings-backdrop");
 const settingsPanel = element<HTMLElement>("settings-panel");
-const signatureSettingButton = element<HTMLButtonElement>("signature-setting-button");
-const signatureEditor = element<HTMLElement>("signature-editor");
-const signatureForm = element<HTMLFormElement>("signature-form");
-const signatureInput = element<HTMLInputElement>("signature-input");
-const signatureError = element<HTMLElement>("signature-error");
-const signatureText = element<HTMLElement>("signature-text");
+const dailyQuoteText = element<HTMLElement>("daily-quote");
 const anniversarySettingButton = element<HTMLButtonElement>("anniversary-setting-button");
 const anniversaryEditor = element<HTMLElement>("anniversary-editor");
 const anniversaryForm = element<HTMLFormElement>("anniversary-form");
@@ -193,7 +187,6 @@ const footerDrawing = element<SVGSVGElement>("footer-drawing");
 
 let shortcuts: AppShortcut[] = [];
 let settings: AppSettings = {
-  signature: DEFAULT_SIGNATURE,
   launchOnStartup: false,
   hasCompletedWelcome: false,
   theme: "system",
@@ -211,6 +204,7 @@ let runningDetectionPending = true;
 let runningDetectionInFlight = false;
 let runningPollTimer: number | undefined;
 let greetingTimer: number | undefined;
+let dailyQuoteTimer: number | undefined;
 let toastTimer: number | undefined;
 let welcomeOpen = false;
 let availableUpdate: Update | null = null;
@@ -334,6 +328,11 @@ function applyWeeklySchedules(items: AppShortcut[], weekday: number): AppShortcu
 }
 
 function updateGreeting(now = new Date()): void {
+  const festivalGreeting = holidayGreeting(now);
+  if (festivalGreeting) {
+    pageTitle.textContent = festivalGreeting;
+    return;
+  }
   const anniversaryGreeting = specialAnniversaryGreeting(now);
   if (anniversaryGreeting) {
     pageTitle.textContent = anniversaryGreeting;
@@ -369,6 +368,20 @@ function scheduleGreetingUpdate(now = new Date()): void {
   updateGreeting(now);
   window.clearTimeout(greetingTimer);
   const nextBoundary = new Date(now);
+  if (holidayForDate(now)) {
+    const nextHour = now.getHours() < 12 ? 12 : now.getHours() < 18 ? 18 : 24;
+    if (nextHour === 24) {
+      nextBoundary.setDate(nextBoundary.getDate() + 1);
+      nextBoundary.setHours(0, 0, 0, 0);
+    } else {
+      nextBoundary.setHours(nextHour, 0, 0, 0);
+    }
+    greetingTimer = window.setTimeout(
+      () => scheduleGreetingUpdate(),
+      nextBoundary.getTime() - now.getTime() + 1_000,
+    );
+    return;
+  }
   if (specialAnniversaryGreeting(now)) {
     nextBoundary.setDate(nextBoundary.getDate() + 1);
     nextBoundary.setHours(0, 0, 0, 0);
@@ -388,6 +401,16 @@ function scheduleGreetingUpdate(now = new Date()): void {
     nextBoundary.setHours(next.hour, next.minute, 0, 0);
   }
   greetingTimer = window.setTimeout(() => scheduleGreetingUpdate(), nextBoundary.getTime() - now.getTime() + 1_000);
+}
+
+function scheduleDailyQuoteUpdate(now = new Date()): void {
+  dailyQuoteText.textContent = dailyQuote(now);
+  window.clearTimeout(dailyQuoteTimer);
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  dailyQuoteTimer = window.setTimeout(
+    () => scheduleDailyQuoteUpdate(),
+    tomorrow.getTime() - now.getTime() + 1_000,
+  );
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -595,7 +618,6 @@ function render(): void {
         : "全开";
   sleepAllButton.disabled = shortcuts.length === 0 || shortcuts.every((shortcut) => shortcut.sleeping);
   wakeAllButton.disabled = shortcuts.length === 0 || shortcuts.every((shortcut) => !shortcut.sleeping);
-  signatureText.textContent = settings.signature;
 }
 
 async function persist(): Promise<void> {
@@ -928,7 +950,7 @@ function openSettings(): void {
   settingsPanel.classList.add("is-open");
   settingsPanel.setAttribute("aria-hidden", "false");
   settingsButton.setAttribute("aria-expanded", "true");
-  window.setTimeout(() => signatureSettingButton.focus(), 0);
+  window.setTimeout(() => anniversarySettingButton.focus(), 0);
 }
 
 function setSettingsEditor(button: HTMLButtonElement, editor: HTMLElement, open: boolean): void {
@@ -943,7 +965,6 @@ function closeSettings(): void {
   settingsPanel.setAttribute("aria-hidden", "true");
   settingsButton.setAttribute("aria-expanded", "false");
   settingsBackdrop.hidden = true;
-  setSettingsEditor(signatureSettingButton, signatureEditor, false);
   setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
   setSettingsEditor(bulkSettingButton, bulkEditor, false);
   setSettingsEditor(themeSettingButton, themeEditor, false);
@@ -951,26 +972,11 @@ function closeSettings(): void {
   settingsButton.focus();
 }
 
-function closeOtherSettingsEditors(except: "signature" | "anniversary" | "bulk" | "theme" | "startup"): void {
-  if (except !== "signature") setSettingsEditor(signatureSettingButton, signatureEditor, false);
+function closeOtherSettingsEditors(except: "anniversary" | "bulk" | "theme" | "startup"): void {
   if (except !== "anniversary") setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
   if (except !== "bulk") setSettingsEditor(bulkSettingButton, bulkEditor, false);
   if (except !== "theme") setSettingsEditor(themeSettingButton, themeEditor, false);
   if (except !== "startup") setSettingsEditor(startupSettingButton, startupEditor, false);
-}
-
-function toggleSignatureEditor(): void {
-  const opening = !signatureEditor.classList.contains("is-open");
-  closeOtherSettingsEditors("signature");
-  setSettingsEditor(signatureSettingButton, signatureEditor, opening);
-  signatureError.hidden = true;
-  if (opening) {
-    signatureInput.value = settings.signature;
-    window.setTimeout(() => {
-      signatureInput.focus();
-      signatureInput.select();
-    }, 0);
-  }
 }
 
 function toggleAnniversaryEditor(): void {
@@ -1229,29 +1235,6 @@ async function setAllSleeping(sleeping: boolean): Promise<void> {
   }
 }
 
-async function saveSignature(): Promise<void> {
-  const signature = signatureInput.value.trim();
-  if (!signature || [...signature].length > 48) {
-    signatureError.textContent = "签名应为 1 到 48 个字符。";
-    signatureError.hidden = false;
-    return;
-  }
-
-  const previous = settings;
-  settings = { ...settings, signature };
-  signatureText.textContent = signature;
-  try {
-    await invoke("save_settings", { settings });
-    setSettingsEditor(signatureSettingButton, signatureEditor, false);
-    showToast("签名已更新");
-  } catch (error) {
-    settings = previous;
-    signatureText.textContent = previous.signature;
-    signatureError.textContent = errorMessage(error);
-    signatureError.hidden = false;
-  }
-}
-
 async function saveAnniversary(): Promise<void> {
   const anniversaryName = anniversaryNameInput.value.trim();
   if (!new RegExp(`^[A-Za-z]{1,${MAX_ANNIVERSARY_NAME_LENGTH}}$`).test(anniversaryName)) {
@@ -1337,6 +1320,7 @@ async function initialize(): Promise<void> {
   else showToast(errorMessage(settingsResult.reason), true);
 
   scheduleGreetingUpdate();
+  scheduleDailyQuoteUpdate();
   render();
   renderStartupSetting();
   renderThemeSetting();
@@ -1368,7 +1352,6 @@ sleepToggle.addEventListener("click", () => {
 settingsButton.addEventListener("click", openSettings);
 settingsCloseButton.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
-signatureSettingButton.addEventListener("click", toggleSignatureEditor);
 anniversarySettingButton.addEventListener("click", toggleAnniversaryEditor);
 bulkSettingButton.addEventListener("click", toggleBulkEditor);
 themeSettingButton.addEventListener("click", toggleThemeEditor);
@@ -1389,11 +1372,6 @@ startupToggle.addEventListener("click", () => void toggleStartup());
 themeToggle.addEventListener("click", () => void toggleTheme());
 sleepAllButton.addEventListener("click", () => void setAllSleeping(true));
 wakeAllButton.addEventListener("click", () => void setAllSleeping(false));
-element<HTMLButtonElement>("signature-cancel-button").addEventListener("click", toggleSignatureEditor);
-signatureForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void saveSignature();
-});
 element<HTMLButtonElement>("anniversary-cancel-button").addEventListener("click", toggleAnniversaryEditor);
 anniversaryNameInput.addEventListener("input", () => {
   const lettersOnly = anniversaryNameInput.value
@@ -1437,10 +1415,14 @@ document.addEventListener("keydown", (event) => {
   else if (event.key === "Escape" && settingsPanel.classList.contains("is-open")) closeSettings();
   else if (event.key === "Escape" && guideView.classList.contains("is-open")) closeGuide();
 });
-window.addEventListener("focus", () => scheduleGreetingUpdate());
+window.addEventListener("focus", () => {
+  scheduleGreetingUpdate();
+  scheduleDailyQuoteUpdate();
+});
 window.addEventListener("beforeunload", () => {
   window.clearInterval(runningPollTimer);
   window.clearTimeout(greetingTimer);
+  window.clearTimeout(dailyQuoteTimer);
 });
 element<HTMLButtonElement>("minimize-button").addEventListener("click", () => void appWindow.minimize());
 element<HTMLButtonElement>("maximize-button").addEventListener("click", () => void appWindow.toggleMaximize());

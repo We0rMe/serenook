@@ -94,7 +94,7 @@
               <path id="footer-name-flourish" class="draw-line name-flourish" pathLength="1" d="M27 84c33 4 70 4 116-2" />
             </svg>
           </div>
-          <span id="signature-text">慢一点，也是在向前。</span>
+          <span id="daily-quote" role="note" aria-label="今日日签">清晨不回答问题，只把轮廓慢慢照亮。</span>
         </footer>
       </main>
 
@@ -125,27 +125,6 @@
           </button>
         </header>
         <div class="settings-list">
-          <button id="signature-setting-button" class="setting-item" type="button" aria-expanded="false">
-            <span class="setting-item-icon" data-icon="signature" aria-hidden="true"></span>
-            <span class="setting-item-copy">
-              <strong>自定义签名</strong>
-              <small>修改工作台右下角的文字</small>
-            </span>
-            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
-          </button>
-          <div id="signature-editor" class="signature-editor" aria-hidden="true" inert>
-            <div class="signature-editor-inner">
-              <form id="signature-form" class="signature-form">
-                <label for="signature-input">签名内容</label>
-                <input id="signature-input" type="text" maxlength="48" autocomplete="off" />
-                <p id="signature-error" class="form-error" role="alert" hidden></p>
-                <div class="signature-actions">
-                  <button id="signature-cancel-button" class="secondary-button" type="button">取消</button>
-                  <button class="primary-button" type="submit">保存</button>
-                </div>
-              </form>
-            </div>
-          </div>
           <button id="anniversary-setting-button" class="setting-item" type="button" aria-expanded="false">
             <span class="setting-item-icon" data-icon="flower" aria-hidden="true"></span>
             <span class="setting-item-copy">
@@ -154,9 +133,9 @@
             </span>
             <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
           </button>
-          <div id="anniversary-editor" class="signature-editor" aria-hidden="true" inert>
-            <div class="signature-editor-inner">
-              <form id="anniversary-form" class="signature-form anniversary-form" novalidate>
+          <div id="anniversary-editor" class="setting-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
+              <form id="anniversary-form" class="setting-form anniversary-form" novalidate>
                 <p class="anniversary-copy">给这段日子一个名字，再记下第一天。</p>
                 <label for="anniversary-name-input">纪念日名称</label>
                 <input id="anniversary-name-input" type="text" maxlength="7" pattern="[A-Za-z]{1,7}" placeholder="Love" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="anniversary-name-hint" title="请输入 1–7 个英文字母" required />
@@ -164,7 +143,7 @@
                 <label for="anniversary-input">纪念日的第一天</label>
                 <input id="anniversary-input" type="date" min="1900-01-01" required />
                 <p id="anniversary-error" class="form-error" role="alert" hidden></p>
-                <div class="signature-actions">
+                <div class="setting-actions">
                   <button id="anniversary-cancel-button" class="secondary-button" type="button">取消</button>
                   <button class="primary-button" type="submit">保存</button>
                 </div>
@@ -179,8 +158,8 @@
             </span>
             <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
           </button>
-          <div id="bulk-editor" class="signature-editor bulk-editor" aria-hidden="true" inert>
-            <div class="signature-editor-inner">
+          <div id="bulk-editor" class="setting-editor bulk-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
               <div class="bulk-action-panel">
                 <button id="sleep-all-button" class="bulk-action-button" type="button">
                   <span data-icon="moon" aria-hidden="true"></span>
@@ -201,8 +180,8 @@
             </span>
             <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
           </button>
-          <div id="theme-editor" class="signature-editor" aria-hidden="true" inert>
-            <div class="signature-editor-inner">
+          <div id="theme-editor" class="setting-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
               <div class="startup-panel">
                 <button id="theme-toggle" class="startup-toggle" type="button" aria-pressed="false">
                   <span>
@@ -230,8 +209,8 @@
             </span>
             <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
           </button>
-          <div id="startup-editor" class="signature-editor" aria-hidden="true" inert>
-            <div class="signature-editor-inner">
+          <div id="startup-editor" class="setting-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
               <div class="startup-panel">
                 <button id="startup-toggle" class="startup-toggle" type="button" aria-pressed="false">
                   <span>
@@ -285,16 +264,16 @@
             <article class="guide-block">
               <span class="guide-number">04</span>
               <div>
-                <h3>留下你的印记</h3>
-                <p>签名、明暗与随电脑启动，都可以按你的习惯调整。纪念日默认名为 Love，也可换成 1–7 个英文字母；保存日期后，轻点左下角的盆栽即可查看累计天数。</p>
+                <h3>日子各有回声</h3>
+                <p>问候会随星期、时段与节日而变，右下角的日签每日更替。明暗、纪念日与随电脑启动，仍可按你的习惯调整。</p>
               </div>
             </article>
 
             <article class="guide-block">
               <span class="guide-number">05</span>
               <div>
-                <h3>安静地更新</h3>
-                <p>Serenook 会在启动后轻量检查新版本。发现更新时，你可以先读完说明，再选择稍后处理或立即安装。</p>
+                <h3>更新</h3>
+                <p>Serenook 会在启动后自查新版本。发现更新时，你可以先读完说明，再选择稍后处理或立即安装。</p>
               </div>
             </article>
           </div>

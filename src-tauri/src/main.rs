@@ -44,9 +44,7 @@ use windows::{
 };
 
 const MAX_SHORTCUTS: usize = 40;
-const MAX_SIGNATURE_CHARACTERS: usize = 48;
 const MAX_ANNIVERSARY_NAME_CHARACTERS: usize = 7;
-const DEFAULT_SIGNATURE: &str = "慢一点，也是在向前。";
 const DEFAULT_ANNIVERSARY_NAME: &str = "Love";
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "exe", "lnk", "bat", "cmd", "url", "txt", "md", "rtf", "pdf", "xps", "doc", "docx", "docm",
@@ -94,7 +92,6 @@ struct AppShortcut {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppSettings {
-    signature: String,
     #[serde(default)]
     launch_on_startup: bool,
     #[serde(default = "existing_user_has_completed_welcome")]
@@ -127,7 +124,6 @@ fn default_anniversary_name() -> String {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            signature: DEFAULT_SIGNATURE.into(),
             launch_on_startup: false,
             has_completed_welcome: false,
             theme: ThemePreference::System,
@@ -471,10 +467,6 @@ fn is_valid_calendar_date(value: &str) -> bool {
 }
 
 fn validate_settings(settings: &AppSettings) -> Result<(), String> {
-    let length = settings.signature.trim().chars().count();
-    if length == 0 || length > MAX_SIGNATURE_CHARACTERS {
-        return Err(format!("签名应为 1 到 {MAX_SIGNATURE_CHARACTERS} 个字符。"));
-    }
     if settings
         .anniversary_date
         .as_deref()
@@ -775,7 +767,6 @@ fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<(), String> {
-    settings.signature = settings.signature.trim().to_string();
     settings.anniversary_name = settings.anniversary_name.trim().to_string();
     validate_settings(&settings)?;
     set_launch_on_startup(settings.launch_on_startup)?;
@@ -925,20 +916,6 @@ mod tests {
     }
 
     #[test]
-    fn validates_custom_signature() {
-        assert!(validate_settings(&AppSettings::default()).is_ok());
-        assert!(validate_settings(&AppSettings {
-            signature: " ".into(),
-            launch_on_startup: false,
-            has_completed_welcome: false,
-            theme: ThemePreference::System,
-            anniversary_date: None,
-            anniversary_name: default_anniversary_name(),
-        })
-        .is_err());
-    }
-
-    #[test]
     fn validates_anniversary_names() {
         let mut settings = AppSettings::default();
         settings.anniversary_name = "Birth".into();
@@ -961,7 +938,8 @@ mod tests {
 
     #[test]
     fn defaults_legacy_settings_to_no_startup() {
-        let settings: AppSettings = serde_json::from_str(r#"{"signature":"慢一点。"}"#).unwrap();
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"signature":"旧版签名会被安静忽略"}"#).unwrap();
         assert!(!settings.launch_on_startup);
         assert!(settings.has_completed_welcome);
         assert_eq!(settings.theme, ThemePreference::System);
