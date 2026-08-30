@@ -10,6 +10,7 @@ import "./styles.css";
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet" | "pdf" | "presentation";
 type ShortcutKind = "local" | "web" | "folder";
 type ThemePreference = "system" | "light" | "dark";
+type WorkspaceModuleId = "shortcuts" | "checklists" | "diaries";
 
 interface AppShortcut {
   id: string;
@@ -27,13 +28,55 @@ interface AppSettings {
   theme: ThemePreference;
   anniversaryDate: string | null;
   anniversaryName: string;
+  workspaceOrder: WorkspaceModuleId[];
+  collapsedModules: WorkspaceModuleId[];
+}
+
+interface ChecklistTask {
+  id: string;
+  content: string;
+  completed: boolean;
+  important: boolean;
+}
+
+interface Checklist {
+  id: string;
+  name: string;
+  dailyReset: boolean;
+  lastResetDate: string | null;
+  tasks: ChecklistTask[];
+}
+
+interface DiaryEntry {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 const DEFAULT_ANNIVERSARY_NAME = "Love";
 const MAX_ANNIVERSARY_NAME_LENGTH = 7;
+const MAX_CHECKLIST_NAME_LENGTH = 32;
+const MAX_TASK_CONTENT_LENGTH = 200;
+const MAX_DIARY_TITLE_LENGTH = 80;
+const MAX_DIARY_CONTENT_LENGTH = 5_000;
+const DIARY_READER_CLOSE_DELAY_MS = 440;
+const DIARY_READER_SETTLE_DELAY_MS = 500;
+const WORKSPACE_MODULE_IDS: WorkspaceModuleId[] = ["shortcuts", "checklists", "diaries"];
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
 const MILLISECONDS_PER_DAY = 86_400_000;
+const DIARY_DATE_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const DIARY_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 const WEEKDAYS = [
   { value: 1, short: "一" },
   { value: 2, short: "二" },
@@ -108,11 +151,26 @@ const ICONS: Record<string, string> = {
   startup: '<svg viewBox="0 0 24 24"><path d="M12 3v9M8.5 6.2A7.5 7.5 0 1 0 15.5 6"/></svg>',
   calendar: '<svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 9.5h16M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/></svg>',
   flower: '<svg viewBox="0 0 24 24"><path d="M12 21v-8M12 17c-3-3-6-3-8-1 2 3 5 4 8 1ZM12 15c3-3 6-3 8-1-2 3-5 4-8 1Z"/><path d="M12 5c1.5-3 5-1.5 4 1.2 3-.6 3.8 3 .9 3.8.4 3-3.3 3.5-4 1-2 2.3-4.8-.1-3.1-2.4-2.8-1.2-1.5-4.7 1.2-4.2.2-2.4 3.7-3.2 4-1Z"/></svg>',
+  grip: '<svg class="grip-icon" viewBox="0 0 24 24"><circle cx="8.5" cy="6" r="1.35"/><circle cx="15.5" cy="6" r="1.35"/><circle cx="8.5" cy="12" r="1.35"/><circle cx="15.5" cy="12" r="1.35"/><circle cx="8.5" cy="18" r="1.35"/><circle cx="15.5" cy="18" r="1.35"/></svg>',
+  checklist: '<svg viewBox="0 0 24 24"><path d="M9 6h10M9 12h10M9 18h10"/><path d="m4.5 6 1 1 2-2M4.5 12l1 1 2-2M4.5 18l1 1 2-2"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V4.5h6V7M7.5 7l.7 13h7.6l.7-13M10 11v5M14 11v5"/></svg>',
+  star: '<svg viewBox="0 0 24 24"><path d="m12 3.8 2.45 4.96 5.47.8-3.96 3.85.94 5.44L12 16.28l-4.9 2.57.94-5.44-3.96-3.85 5.47-.8L12 3.8Z"/></svg>',
 };
 
 const appWindow = getCurrentWindow();
 const mainView = document.querySelector<HTMLElement>("main")!;
 const pageTitle = element<HTMLElement>("page-title");
+const intro = pageTitle.closest<HTMLElement>(".intro")!;
+const workspaceSections = element<HTMLElement>("workspace-sections");
+const shortcutsModule = element<HTMLElement>("shortcuts-module");
+const shortcutsModuleToggle = element<HTMLButtonElement>("shortcuts-module-toggle");
+const shortcutsModuleContent = element<HTMLElement>("shortcuts-module-content");
+const checklistsModule = element<HTMLElement>("checklists-module");
+const checklistsModuleToggle = element<HTMLButtonElement>("checklists-module-toggle");
+const checklistsModuleContent = element<HTMLElement>("checklists-module-content");
+const diariesModule = element<HTMLElement>("diaries-module");
+const diariesModuleToggle = element<HTMLButtonElement>("diaries-module-toggle");
+const diariesModuleContent = element<HTMLElement>("diaries-module-content");
 const shortcutGrid = element<HTMLElement>("shortcut-grid");
 const emptyState = element<HTMLElement>("empty-state");
 const editButton = element<HTMLButtonElement>("edit-button");
@@ -184,14 +242,45 @@ const anniversaryPlant = element<HTMLButtonElement>("anniversary-plant");
 const footerName = element<SVGTextElement>("footer-name");
 const footerNameFlourish = element<SVGPathElement>("footer-name-flourish");
 const footerDrawing = element<SVGSVGElement>("footer-drawing");
+const checklistGrid = element<HTMLElement>("checklist-grid");
+const checklistEmptyState = element<HTMLElement>("checklist-empty-state");
+const addChecklistButton = element<HTMLButtonElement>("add-checklist-button");
+const emptyChecklistAddButton = element<HTMLButtonElement>("empty-checklist-add-button");
+const checklistDialog = element<HTMLDialogElement>("checklist-dialog");
+const checklistForm = element<HTMLFormElement>("checklist-form");
+const checklistNameInput = element<HTMLInputElement>("checklist-name-input");
+const checklistDailyResetInput = element<HTMLInputElement>("checklist-daily-reset-input");
+const checklistFormError = element<HTMLElement>("checklist-form-error");
+const diaryGrid = element<HTMLElement>("diary-grid");
+const diaryEmptyState = element<HTMLElement>("diary-empty-state");
+const addDiaryButton = element<HTMLButtonElement>("add-diary-button");
+const emptyDiaryAddButton = element<HTMLButtonElement>("empty-diary-add-button");
+const diaryDialog = element<HTMLDialogElement>("diary-dialog");
+const diaryForm = element<HTMLFormElement>("diary-form");
+const diaryDialogTitle = element<HTMLElement>("diary-dialog-title");
+const diaryIdInput = element<HTMLInputElement>("diary-id-input");
+const diaryTitleInput = element<HTMLInputElement>("diary-title-input");
+const diaryContentInput = element<HTMLTextAreaElement>("diary-content-input");
+const diaryDialogTimes = element<HTMLElement>("diary-dialog-times");
+const diaryFormError = element<HTMLElement>("diary-form-error");
+const diaryDeleteButton = element<HTMLButtonElement>("diary-delete-button");
+const diarySaveButton = element<HTMLButtonElement>("diary-save-button");
+const diaryReaderDialog = element<HTMLDialogElement>("diary-reader-dialog");
+const diaryReaderTitle = element<HTMLElement>("diary-reader-title");
+const diaryReaderTimes = element<HTMLElement>("diary-reader-times");
+const diaryReaderContent = element<HTMLElement>("diary-reader-content");
 
 let shortcuts: AppShortcut[] = [];
+let checklists: Checklist[] = [];
+let diaries: DiaryEntry[] = [];
 let settings: AppSettings = {
   launchOnStartup: false,
   hasCompletedWelcome: false,
   theme: "system",
   anniversaryDate: null,
   anniversaryName: DEFAULT_ANNIVERSARY_NAME,
+  workspaceOrder: [...WORKSPACE_MODULE_IDS],
+  collapsedModules: [],
 };
 const appIcons = new Map<string, string | null>();
 const runningTargets = new Set<string>();
@@ -205,12 +294,59 @@ let runningDetectionInFlight = false;
 let runningPollTimer: number | undefined;
 let greetingTimer: number | undefined;
 let dailyQuoteTimer: number | undefined;
+let checklistResetTimer: number | undefined;
 let toastTimer: number | undefined;
 let welcomeOpen = false;
 let availableUpdate: Update | null = null;
 let updateCheckStarted = false;
 let scheduledShortcutId = "";
 let footerMessageShown = false;
+let editingChecklistId: string | null = null;
+let diaryReaderReturnTarget: HTMLElement | null = null;
+let diaryReaderCloseTimer: number | undefined;
+let diaryReaderSettleTimer: number | undefined;
+type ReorderLayout = "vertical" | "grid";
+type ReorderPreviewKind = "module" | "shortcut" | "checklist" | "task";
+
+interface LiveReorderState {
+  source: HTMLElement;
+  handle: HTMLElement;
+  container: HTMLElement;
+  preview: HTMLElement;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  itemSelector: string;
+  layout: ReorderLayout;
+}
+
+interface ModuleDragState {
+  live: LiveReorderState;
+  previousOrder: WorkspaceModuleId[];
+}
+
+let moduleDragState: ModuleDragState | null = null;
+
+interface ChecklistCardDragState {
+  live: LiveReorderState;
+  previousOrder: string[];
+}
+
+interface ShortcutCardDragState {
+  live: LiveReorderState;
+  previousOrder: string[];
+  sleeping: boolean;
+}
+
+interface ChecklistTaskDragState {
+  live: LiveReorderState;
+  checklistId: string;
+  previousOrder: string[];
+}
+
+let checklistCardDragState: ChecklistCardDragState | null = null;
+let shortcutCardDragState: ShortcutCardDragState | null = null;
+let checklistTaskDragState: ChecklistTaskDragState | null = null;
 
 function element<T extends Element>(id: string): T {
   const value = document.getElementById(id);
@@ -230,6 +366,172 @@ function hydrateStaticIcons(): void {
   document.querySelectorAll<HTMLElement>("[data-icon]").forEach((holder) => {
     holder.innerHTML = ICONS[holder.dataset.icon ?? "app"] ?? ICONS.app;
   });
+}
+
+function stripDragPreviewSemantics(preview: HTMLElement): void {
+  preview.removeAttribute("id");
+  preview.setAttribute("aria-hidden", "true");
+  preview.querySelectorAll<HTMLElement>("[id]").forEach((element) => element.removeAttribute("id"));
+  preview.querySelectorAll<HTMLElement>("button, input, [tabindex]").forEach((element) => {
+    element.setAttribute("tabindex", "-1");
+  });
+}
+
+function hasSameIds(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const expected = new Set(right);
+  return expected.size === right.length && left.every((id) => expected.has(id));
+}
+
+function hasSameOrder(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function beginLiveReorder(
+  event: PointerEvent,
+  source: HTMLElement,
+  handle: HTMLElement,
+  container: HTMLElement,
+  itemSelector: string,
+  layout: ReorderLayout,
+  previewKind: ReorderPreviewKind,
+  previewSource = source,
+): LiveReorderState | null {
+  if (
+    event.button !== 0
+    || moduleDragState
+    || checklistCardDragState
+    || shortcutCardDragState
+    || checklistTaskDragState
+  ) return null;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const bounds = previewSource.getBoundingClientRect();
+  const preview = previewSource.cloneNode(true) as HTMLElement;
+  stripDragPreviewSemantics(preview);
+  preview.classList.add("reorder-preview", `reorder-preview-${previewKind}`);
+  preview.style.left = `${bounds.left}px`;
+  preview.style.top = `${bounds.top}px`;
+  preview.style.width = `${bounds.width}px`;
+  preview.style.height = `${bounds.height}px`;
+  preview.style.transform = "translate3d(0, 0, 0) scale(1.012)";
+  document.body.append(preview);
+
+  source.classList.add("is-reorder-source");
+  handle.classList.add("is-dragging");
+  handle.setPointerCapture(event.pointerId);
+  document.body.classList.add("is-reordering");
+  return {
+    source,
+    handle,
+    container,
+    preview,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    itemSelector,
+    layout,
+  };
+}
+
+function animateReorderShift(state: LiveReorderState, move: () => void): void {
+  const items = [...state.container.querySelectorAll<HTMLElement>(state.itemSelector)]
+    .filter((item) => item !== state.source);
+  items.forEach((item) => item.getAnimations().forEach((animation) => animation.cancel()));
+  const before = new Map(items.map((item) => [item, item.getBoundingClientRect()]));
+  move();
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  for (const item of items) {
+    const previous = before.get(item);
+    if (!previous) continue;
+    const current = item.getBoundingClientRect();
+    const deltaX = previous.left - current.left;
+    const deltaY = previous.top - current.top;
+    if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) continue;
+    item.animate(
+      [
+        { transform: `translate3d(${deltaX}px, ${deltaY}px, 0)` },
+        { transform: "translate3d(0, 0, 0)" },
+      ],
+      { duration: 170, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+    );
+  }
+}
+
+function reorderTargetBounds(state: LiveReorderState, item: HTMLElement): DOMRect {
+  if (state.itemSelector === ".workspace-module") {
+    const heading = item.querySelector<HTMLElement>(".workspace-module-heading");
+    if (heading) return heading.getBoundingClientRect();
+  }
+  return item.getBoundingClientRect();
+}
+
+function closestReorderTarget(state: LiveReorderState, clientX: number, clientY: number): HTMLElement | null {
+  const direct = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(state.itemSelector);
+  if (direct && direct !== state.source && direct.parentElement === state.container) return direct;
+
+  const candidates = [...state.container.querySelectorAll<HTMLElement>(state.itemSelector)]
+    .filter((item) => item !== state.source);
+  let nearest: HTMLElement | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const bounds = reorderTargetBounds(state, candidate);
+    const deltaX = clientX - (bounds.left + bounds.width / 2);
+    const deltaY = clientY - (bounds.top + bounds.height / 2);
+    const distance = deltaX * deltaX + deltaY * deltaY;
+    if (distance < nearestDistance) {
+      nearest = candidate;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+function scrollDuringReorder(state: LiveReorderState, clientY: number): void {
+  const scrollHost = state.container.closest<HTMLElement>(".checklist-task-frame") ?? mainView;
+  const bounds = scrollHost.getBoundingClientRect();
+  const edge = Math.min(44, bounds.height * 0.18);
+  if (clientY < bounds.top + edge) scrollHost.scrollTop -= 14;
+  else if (clientY > bounds.bottom - edge) scrollHost.scrollTop += 14;
+}
+
+function moveLiveReorder(event: PointerEvent, state: LiveReorderState): void {
+  if (state.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  const deltaX = event.clientX - state.startX;
+  const deltaY = event.clientY - state.startY;
+  state.preview.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0) scale(1.012)`;
+  scrollDuringReorder(state, event.clientY);
+
+  const containerBounds = state.container.getBoundingClientRect();
+  if (
+    event.clientX < containerBounds.left - 36
+    || event.clientX > containerBounds.right + 36
+    || event.clientY < containerBounds.top - 36
+    || event.clientY > containerBounds.bottom + 36
+  ) return;
+
+  const target = closestReorderTarget(state, event.clientX, event.clientY);
+  if (!target) return;
+  const bounds = reorderTargetBounds(state, target);
+  const after = state.layout === "vertical"
+    ? event.clientY > bounds.top + bounds.height / 2
+    : Math.abs(event.clientY - (bounds.top + bounds.height / 2)) > bounds.height / 2
+      ? event.clientY > bounds.top + bounds.height / 2
+      : event.clientX > bounds.left + bounds.width / 2;
+  const reference = after ? target.nextElementSibling : target;
+  if (reference === state.source || state.source.nextElementSibling === reference) return;
+  animateReorderShift(state, () => state.container.insertBefore(state.source, reference));
+}
+
+function clearLiveReorder(state: LiveReorderState): void {
+  state.preview.remove();
+  state.source.classList.remove("is-reorder-source");
+  state.handle.classList.remove("is-dragging");
+  if (state.handle.hasPointerCapture(state.pointerId)) state.handle.releasePointerCapture(state.pointerId);
+  document.body.classList.remove("is-reordering");
 }
 
 function shortcutKind(shortcut: AppShortcut): ShortcutKind {
@@ -327,15 +629,22 @@ function applyWeeklySchedules(items: AppShortcut[], weekday: number): AppShortcu
     : { ...shortcut, sleeping: !shortcut.wakeDays.includes(weekday) });
 }
 
+function setGreeting(message: string): void {
+  const length = Array.from(message).length;
+  pageTitle.textContent = message;
+  intro.classList.toggle("is-long-greeting", length > 14);
+  intro.classList.toggle("is-extra-long-greeting", length > 21);
+}
+
 function updateGreeting(now = new Date()): void {
   const festivalGreeting = holidayGreeting(now);
   if (festivalGreeting) {
-    pageTitle.textContent = festivalGreeting;
+    setGreeting(festivalGreeting);
     return;
   }
   const anniversaryGreeting = specialAnniversaryGreeting(now);
   if (anniversaryGreeting) {
-    pageTitle.textContent = anniversaryGreeting;
+    setGreeting(anniversaryGreeting);
     return;
   }
   const weekdayGreetings = [
@@ -361,7 +670,7 @@ function updateGreeting(now = new Date()): void {
             : minutes < 20 * 60 + 30
               ? "傍晚好，把余光留给从容。"
               : "晚上好，做完便好好休息。";
-  pageTitle.textContent = greeting;
+  setGreeting(greeting);
 }
 
 function scheduleGreetingUpdate(now = new Date()): void {
@@ -447,7 +756,9 @@ function inferIcon(name: string, target: string, kind: ShortcutKind): IconName {
 }
 
 function fileTypeMarker(shortcut: AppShortcut): string | null {
-  if (shortcutKind(shortcut) !== "local") return null;
+  const kind = shortcutKind(shortcut);
+  if (kind === "folder") return "DIR";
+  if (kind !== "local") return null;
   const extension = targetExtension(shortcut.target);
   return extension && DOCUMENT_EXTENSIONS.has(extension) ? extension.toUpperCase() : null;
 }
@@ -464,6 +775,1049 @@ function errorMessage(error: unknown): string {
   return typeof error === "string" ? error : error instanceof Error ? error.message : "发生了未知错误。";
 }
 
+function isWorkspaceModuleId(value: unknown): value is WorkspaceModuleId {
+  return typeof value === "string" && WORKSPACE_MODULE_IDS.includes(value as WorkspaceModuleId);
+}
+
+function normalizeWorkspaceOrder(value: unknown): WorkspaceModuleId[] {
+  const order: WorkspaceModuleId[] = [];
+  if (Array.isArray(value)) {
+    for (const module of value) {
+      if (isWorkspaceModuleId(module) && !order.includes(module)) order.push(module);
+    }
+  }
+  return [...order, ...WORKSPACE_MODULE_IDS.filter((module) => !order.includes(module))];
+}
+
+function normalizeCollapsedModules(value: unknown): WorkspaceModuleId[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter(isWorkspaceModuleId))];
+}
+
+function workspaceModuleElements(moduleId: WorkspaceModuleId): {
+  module: HTMLElement;
+  toggle: HTMLButtonElement;
+  content: HTMLElement;
+} {
+  if (moduleId === "shortcuts") {
+    return { module: shortcutsModule, toggle: shortcutsModuleToggle, content: shortcutsModuleContent };
+  }
+  if (moduleId === "checklists") {
+    return { module: checklistsModule, toggle: checklistsModuleToggle, content: checklistsModuleContent };
+  }
+  return { module: diariesModule, toggle: diariesModuleToggle, content: diariesModuleContent };
+}
+
+function applyWorkspaceOrder(): void {
+  settings.workspaceOrder.forEach((moduleId, index) => {
+    const module = workspaceModuleElements(moduleId).module;
+    const current = workspaceSections.children.item(index);
+    if (current !== module) workspaceSections.insertBefore(module, current);
+  });
+}
+
+function renderWorkspaceModules(): void {
+  for (const moduleId of WORKSPACE_MODULE_IDS) {
+    const { module, toggle, content } = workspaceModuleElements(moduleId);
+    const expanded = !settings.collapsedModules.includes(moduleId);
+    module.classList.toggle("is-collapsed", !expanded);
+    toggle.setAttribute("aria-expanded", String(expanded));
+    content.classList.toggle("is-open", expanded);
+    content.setAttribute("aria-hidden", String(!expanded));
+    content.inert = !expanded;
+  }
+}
+
+async function toggleWorkspaceModule(moduleId: WorkspaceModuleId): Promise<void> {
+  const previous = settings;
+  const collapsed = new Set(settings.collapsedModules);
+  if (collapsed.has(moduleId)) collapsed.delete(moduleId);
+  else collapsed.add(moduleId);
+  settings = { ...settings, collapsedModules: [...collapsed] };
+  renderWorkspaceModules();
+  try {
+    await invoke("save_settings", { settings });
+  } catch (error) {
+    settings = previous;
+    renderWorkspaceModules();
+    showToast(errorMessage(error), true);
+  }
+}
+
+function clearModuleDragState(): void {
+  const state = moduleDragState;
+  if (!state) return;
+  clearLiveReorder(state.live);
+  moduleDragState = null;
+}
+
+function beginModuleDrag(event: PointerEvent): void {
+  if (event.button !== 0 || moduleDragState) return;
+  const handle = event.currentTarget as HTMLButtonElement;
+  const moduleId = handle.dataset.moduleId as WorkspaceModuleId;
+  const module = workspaceModuleElements(moduleId).module;
+  const heading = module.querySelector<HTMLElement>(".workspace-module-heading") ?? module;
+  const live = beginLiveReorder(
+    event,
+    module,
+    handle,
+    workspaceSections,
+    ".workspace-module",
+    "vertical",
+    "module",
+    heading,
+  );
+  if (!live) return;
+  moduleDragState = {
+    live,
+    previousOrder: [...workspaceSections.querySelectorAll<HTMLElement>(".workspace-module")]
+      .map((item) => item.dataset.moduleId)
+      .filter(isWorkspaceModuleId),
+  };
+}
+
+function moveModuleDrag(event: PointerEvent): void {
+  const state = moduleDragState;
+  if (!state) return;
+  moveLiveReorder(event, state.live);
+}
+
+async function finishModuleDrag(event: PointerEvent): Promise<void> {
+  const state = moduleDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+
+  const workspaceOrder = [...workspaceSections.querySelectorAll<HTMLElement>(".workspace-module")]
+    .map((module) => module.dataset.moduleId)
+    .filter(isWorkspaceModuleId);
+  clearModuleDragState();
+  if (!hasSameIds(workspaceOrder, state.previousOrder)) {
+    applyWorkspaceOrder();
+    showToast("未能完成排序，请再试一次。", true);
+    return;
+  }
+  if (hasSameOrder(workspaceOrder, state.previousOrder)) return;
+
+  const previous = settings;
+  settings = { ...settings, workspaceOrder };
+  try {
+    await invoke("save_settings", { settings });
+  } catch (error) {
+    settings = previous;
+    applyWorkspaceOrder();
+    showToast(errorMessage(error), true);
+  }
+}
+
+function cancelModuleDrag(event: PointerEvent): void {
+  const state = moduleDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+  clearModuleDragState();
+  applyWorkspaceOrder();
+}
+
+function localDateKey(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function applyDailyChecklistResets(now = new Date()): boolean {
+  const today = localDateKey(now);
+  let changed = false;
+  checklists = checklists.map((checklist) => {
+    if (!checklist.dailyReset || checklist.lastResetDate === today) return checklist;
+    changed = true;
+    return {
+      ...checklist,
+      lastResetDate: today,
+      tasks: checklist.tasks.map((task) => task.completed ? { ...task, completed: false } : task),
+    };
+  });
+  return changed;
+}
+
+async function persistChecklistChanges(previous: Checklist[], successMessage?: string): Promise<boolean> {
+  try {
+    await invoke("save_checklists", { checklists });
+    if (successMessage) showToast(successMessage);
+    return true;
+  } catch (error) {
+    checklists = previous;
+    renderChecklists();
+    showToast(errorMessage(error), true);
+    return false;
+  }
+}
+
+function scheduleChecklistReset(now = new Date()): void {
+  window.clearTimeout(checklistResetTimer);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 1, 0);
+  checklistResetTimer = window.setTimeout(() => void refreshDailyChecklists(), tomorrow.getTime() - now.getTime());
+}
+
+async function refreshDailyChecklists(now = new Date()): Promise<void> {
+  const previous = checklists;
+  if (applyDailyChecklistResets(now)) {
+    renderChecklists();
+    await persistChecklistChanges(previous);
+  }
+  scheduleChecklistReset(now);
+}
+
+function openChecklistDialog(): void {
+  checklistForm.reset();
+  checklistFormError.hidden = true;
+  checklistDialog.showModal();
+  window.setTimeout(() => checklistNameInput.focus(), 0);
+}
+
+function closeChecklistDialog(): void {
+  checklistDialog.close();
+  addChecklistButton.focus();
+}
+
+async function addChecklistFromForm(): Promise<void> {
+  const name = checklistNameInput.value.trim();
+  if (!name) {
+    checklistFormError.textContent = "请为这张清单写一个名称。";
+    checklistFormError.hidden = false;
+    return;
+  }
+
+  const previous = checklists;
+  const dailyReset = checklistDailyResetInput.checked;
+  const checklist: Checklist = {
+    id: crypto.randomUUID(),
+    name,
+    dailyReset,
+    lastResetDate: dailyReset ? localDateKey() : null,
+    tasks: [],
+  };
+  checklists = [...checklists, checklist];
+  renderChecklists();
+  try {
+    await invoke("save_checklists", { checklists });
+    closeChecklistDialog();
+    showToast(`已添加清单「${name}」`);
+  } catch (error) {
+    checklists = previous;
+    renderChecklists();
+    checklistFormError.textContent = errorMessage(error);
+    checklistFormError.hidden = false;
+  }
+}
+
+async function renameChecklist(checklistId: string, name: string, input: HTMLInputElement): Promise<void> {
+  const trimmed = name.trim();
+  const current = checklists.find((checklist) => checklist.id === checklistId);
+  if (!current) return;
+  if (!trimmed) {
+    input.value = current.name;
+    showToast("清单名称不能为空。", true);
+    return;
+  }
+  if (trimmed === current.name) return;
+
+  const previous = checklists;
+  checklists = checklists.map((checklist) =>
+    checklist.id === checklistId ? { ...checklist, name: trimmed } : checklist);
+  input.value = trimmed;
+  await persistChecklistChanges(previous);
+}
+
+async function toggleChecklistDailyReset(checklistId: string): Promise<void> {
+  const previous = checklists;
+  const today = localDateKey();
+  checklists = checklists.map((checklist) => checklist.id === checklistId
+    ? {
+        ...checklist,
+        dailyReset: !checklist.dailyReset,
+        lastResetDate: checklist.dailyReset ? null : today,
+      }
+    : checklist);
+  renderChecklists();
+  await persistChecklistChanges(previous);
+}
+
+async function addChecklistTask(
+  checklistId: string,
+  input: HTMLInputElement,
+  importantButton: HTMLButtonElement,
+): Promise<void> {
+  const content = input.value.trim();
+  if (!content) return;
+  const important = importantButton.getAttribute("aria-pressed") === "true";
+  const previous = checklists;
+  checklists = checklists.map((checklist) => checklist.id === checklistId
+    ? { ...checklist, tasks: [...checklist.tasks, { id: crypto.randomUUID(), content, completed: false, important }] }
+    : checklist);
+  renderChecklists();
+  if (await persistChecklistChanges(previous)) {
+    window.setTimeout(() => checklistGrid.querySelector<HTMLInputElement>(`[data-task-input="${checklistId}"]`)?.focus(), 0);
+  }
+}
+
+async function renameChecklistTask(
+  checklistId: string,
+  taskId: string,
+  content: string,
+  input: HTMLInputElement,
+): Promise<void> {
+  const checklist = checklists.find((item) => item.id === checklistId);
+  const task = checklist?.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+  const trimmed = content.trim();
+  if (!trimmed) {
+    input.value = task.content;
+    showToast("任务内容不能为空。", true);
+    return;
+  }
+  if (trimmed === task.content) return;
+
+  const previous = checklists;
+  checklists = checklists.map((item) => item.id === checklistId
+    ? {
+        ...item,
+        tasks: item.tasks.map((candidate) => candidate.id === taskId ? { ...candidate, content: trimmed } : candidate),
+      }
+    : item);
+  input.value = trimmed;
+  await persistChecklistChanges(previous);
+}
+
+async function toggleChecklistTaskImportance(checklistId: string, taskId: string): Promise<void> {
+  const previous = checklists;
+  checklists = checklists.map((checklist) => checklist.id === checklistId
+    ? {
+        ...checklist,
+        tasks: checklist.tasks.map((task) => task.id === taskId ? { ...task, important: !task.important } : task),
+      }
+    : checklist);
+  renderChecklists();
+  await persistChecklistChanges(previous);
+}
+
+async function toggleChecklistTask(checklistId: string, taskId: string): Promise<void> {
+  const previous = checklists;
+  checklists = checklists.map((checklist) => checklist.id === checklistId
+    ? {
+        ...checklist,
+        tasks: checklist.tasks.map((task) => task.id === taskId ? { ...task, completed: !task.completed } : task),
+      }
+    : checklist);
+  renderChecklists();
+  await persistChecklistChanges(previous);
+}
+
+async function removeChecklistTask(checklistId: string, taskId: string): Promise<void> {
+  const previous = checklists;
+  checklists = checklists.map((checklist) => checklist.id === checklistId
+    ? { ...checklist, tasks: checklist.tasks.filter((task) => task.id !== taskId) }
+    : checklist);
+  renderChecklists();
+  await persistChecklistChanges(previous);
+}
+
+async function removeChecklist(checklistId: string): Promise<void> {
+  const removed = checklists.find((checklist) => checklist.id === checklistId);
+  if (!removed) return;
+  const previous = checklists;
+  checklists = checklists.filter((checklist) => checklist.id !== checklistId);
+  editingChecklistId = null;
+  renderChecklists();
+  await persistChecklistChanges(previous, `已移除清单「${removed.name}」`);
+}
+
+function clearChecklistCardDragState(): void {
+  const state = checklistCardDragState;
+  if (!state) return;
+  clearLiveReorder(state.live);
+  checklistCardDragState = null;
+}
+
+function beginChecklistCardDrag(
+  event: PointerEvent,
+  card: HTMLElement,
+  handle: HTMLElement,
+): void {
+  if (event.button !== 0 || checklistCardDragState) return;
+  const live = beginLiveReorder(
+    event,
+    card,
+    handle,
+    checklistGrid,
+    ".checklist-card",
+    "grid",
+    "checklist",
+  );
+  if (!live) return;
+  checklistCardDragState = {
+    live,
+    previousOrder: [...checklistGrid.querySelectorAll<HTMLElement>(".checklist-card")]
+      .map((item) => item.dataset.checklistId)
+      .filter((id): id is string => Boolean(id)),
+  };
+}
+
+function moveChecklistCardDrag(event: PointerEvent): void {
+  const state = checklistCardDragState;
+  if (!state) return;
+  moveLiveReorder(event, state.live);
+}
+
+async function finishChecklistCardDrag(event: PointerEvent): Promise<void> {
+  const state = checklistCardDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+  const nextOrder = [...checklistGrid.querySelectorAll<HTMLElement>(".checklist-card")]
+    .map((item) => item.dataset.checklistId)
+    .filter((id): id is string => Boolean(id));
+  clearChecklistCardDragState();
+  if (!hasSameIds(nextOrder, state.previousOrder)) {
+    renderChecklists();
+    showToast("未能完成排序，请再试一次。", true);
+    return;
+  }
+  if (hasSameOrder(nextOrder, state.previousOrder)) return;
+
+  const previous = checklists;
+  const byId = new Map(checklists.map((checklist) => [checklist.id, checklist]));
+  checklists = nextOrder.map((id) => byId.get(id)).filter((checklist): checklist is Checklist => Boolean(checklist));
+  renderChecklists();
+  await persistChecklistChanges(previous);
+}
+
+function cancelChecklistCardDrag(event: PointerEvent): void {
+  const state = checklistCardDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+  clearChecklistCardDragState();
+  renderChecklists();
+}
+
+function clearChecklistTaskDragState(): void {
+  const state = checklistTaskDragState;
+  if (!state) return;
+  clearLiveReorder(state.live);
+  checklistTaskDragState = null;
+}
+
+function beginChecklistTaskDrag(
+  event: PointerEvent,
+  checklistId: string,
+  item: HTMLElement,
+  handle: HTMLElement,
+): void {
+  if (event.button !== 0 || checklistTaskDragState || !(item.parentElement instanceof HTMLElement)) return;
+  const list = item.parentElement;
+  const live = beginLiveReorder(
+    event,
+    item,
+    handle,
+    list,
+    ".checklist-task",
+    "vertical",
+    "task",
+  );
+  if (!live) return;
+  checklistTaskDragState = {
+    live,
+    checklistId,
+    previousOrder: [...list.querySelectorAll<HTMLElement>(".checklist-task")]
+      .map((task) => task.dataset.taskId)
+      .filter((id): id is string => Boolean(id)),
+  };
+}
+
+function moveChecklistTaskDrag(event: PointerEvent): void {
+  const state = checklistTaskDragState;
+  if (!state) return;
+  moveLiveReorder(event, state.live);
+}
+
+async function finishChecklistTaskDrag(event: PointerEvent): Promise<void> {
+  const state = checklistTaskDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+  const nextOrder = [...state.live.container.querySelectorAll<HTMLElement>(".checklist-task")]
+    .map((task) => task.dataset.taskId)
+    .filter((id): id is string => Boolean(id));
+  clearChecklistTaskDragState();
+  if (!hasSameIds(nextOrder, state.previousOrder)) {
+    renderChecklists();
+    showToast("未能完成排序，请再试一次。", true);
+    return;
+  }
+  if (hasSameOrder(nextOrder, state.previousOrder)) return;
+
+  const checklist = checklists.find((item) => item.id === state.checklistId);
+  if (!checklist) {
+    renderChecklists();
+    return;
+  }
+  const previous = checklists;
+  const byId = new Map(checklist.tasks.map((task) => [task.id, task]));
+  const tasks = nextOrder.map((id) => byId.get(id)).filter((task): task is ChecklistTask => Boolean(task));
+  checklists = checklists.map((item) => item.id === checklist.id ? { ...item, tasks } : item);
+  renderChecklists();
+  await persistChecklistChanges(previous);
+}
+
+function cancelChecklistTaskDrag(event: PointerEvent): void {
+  const state = checklistTaskDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+  clearChecklistTaskDragState();
+  renderChecklists();
+}
+
+function createChecklistCard(checklist: Checklist): HTMLElement {
+  const editingChecklist = editingChecklistId === checklist.id;
+  const card = document.createElement("article");
+  card.className = "checklist-card";
+  card.classList.toggle("is-editing", editingChecklist);
+  card.dataset.checklistId = checklist.id;
+
+  const header = document.createElement("header");
+  header.className = "checklist-card-heading";
+  if (editingChecklist) {
+    const dragHandle = document.createElement("span");
+    dragHandle.className = "checklist-card-drag-handle reorder-handle";
+    dragHandle.title = "拖动清单排序";
+    dragHandle.setAttribute("aria-label", `拖动清单「${checklist.name}」排序`);
+    dragHandle.append(icon("grip"));
+    dragHandle.addEventListener("pointerdown", (event) => beginChecklistCardDrag(event, card, dragHandle));
+    header.append(dragHandle);
+  }
+  const titleRow = document.createElement("div");
+  titleRow.className = "checklist-title-row";
+  if (editingChecklist) {
+    const titleInput = document.createElement("input");
+    titleInput.className = "checklist-title-input";
+    titleInput.value = checklist.name;
+    titleInput.maxLength = MAX_CHECKLIST_NAME_LENGTH;
+    titleInput.setAttribute("aria-label", "清单名称");
+    titleInput.addEventListener("change", () => void renameChecklist(checklist.id, titleInput.value, titleInput));
+    titleInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") titleInput.blur();
+      if (event.key === "Escape") {
+        titleInput.value = checklist.name;
+        titleInput.blur();
+      }
+    });
+    titleRow.append(titleInput);
+  } else {
+    const title = document.createElement("h3");
+    title.textContent = checklist.name;
+    titleRow.append(title);
+  }
+
+  const remaining = checklist.tasks.filter((task) => !task.completed).length;
+  const count = document.createElement("span");
+  count.className = "checklist-count";
+  count.textContent = String(remaining);
+  count.setAttribute("aria-label", `${remaining} 个未完成任务`);
+  titleRow.append(count);
+
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "checklist-edit-button";
+  edit.append(icon("edit"));
+  edit.setAttribute("aria-label", editingChecklist ? `完成编辑 ${checklist.name}` : `编辑 ${checklist.name}`);
+  edit.setAttribute("aria-pressed", String(editingChecklist));
+  edit.addEventListener("click", () => {
+    editingChecklistId = editingChecklist ? null : checklist.id;
+    renderChecklists();
+    if (!editingChecklist) {
+      window.setTimeout(() => checklistGrid.querySelector<HTMLInputElement>(`[data-task-input="${checklist.id}"]`)?.focus(), 0);
+    }
+  });
+  header.append(titleRow, edit);
+  card.append(header);
+
+  if (checklist.dailyReset && !editingChecklist) {
+    const resetNote = document.createElement("span");
+    resetNote.className = "checklist-reset-note";
+    resetNote.textContent = "每日重置";
+    card.append(resetNote);
+  }
+
+  const taskFrame = document.createElement("div");
+  taskFrame.className = "checklist-task-frame";
+  if (checklist.tasks.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "checklist-task-empty";
+    empty.textContent = editingChecklist ? "在下方写下第一件事。" : "还没有任务。";
+    taskFrame.append(empty);
+  } else {
+    const list = document.createElement("ol");
+    list.className = "checklist-task-list";
+    for (const task of checklist.tasks) {
+      const item = document.createElement("li");
+      item.className = "checklist-task";
+      item.classList.toggle("is-completed", task.completed);
+      item.classList.toggle("is-important", task.important);
+      item.dataset.taskId = task.id;
+
+      if (editingChecklist) {
+        const dragHandle = document.createElement("span");
+        dragHandle.className = "task-drag-handle reorder-handle";
+        dragHandle.title = "拖动排序";
+        dragHandle.setAttribute("aria-label", `拖动任务「${task.content}」排序`);
+        dragHandle.append(icon("grip"));
+        dragHandle.addEventListener("pointerdown", (event) => beginChecklistTaskDrag(event, checklist.id, item, dragHandle));
+        item.append(dragHandle);
+      }
+
+      const completion = document.createElement("button");
+      completion.type = "button";
+      completion.className = "task-completion";
+      completion.classList.toggle("is-important", task.important);
+      completion.classList.toggle("is-completed", task.completed);
+      completion.setAttribute("aria-pressed", String(task.completed));
+      completion.setAttribute("aria-label", task.completed ? `将「${task.content}」标为未完成` : `完成「${task.content}」`);
+      if (task.important) completion.append(icon("star"));
+      completion.addEventListener("click", () => void toggleChecklistTask(checklist.id, task.id));
+
+      const content = editingChecklist ? document.createElement("input") : document.createElement("span");
+      content.className = editingChecklist ? "task-content-input" : "task-content";
+      if (content instanceof HTMLInputElement) {
+        content.value = task.content;
+        content.maxLength = MAX_TASK_CONTENT_LENGTH;
+        content.setAttribute("aria-label", `修改任务「${task.content}」`);
+        content.addEventListener("change", () => void renameChecklistTask(checklist.id, task.id, content.value, content));
+        content.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") content.blur();
+          if (event.key === "Escape") {
+            content.value = task.content;
+            content.blur();
+          }
+        });
+      } else {
+        content.textContent = task.content;
+      }
+      item.append(completion, content);
+
+      if (editingChecklist) {
+        const important = document.createElement("button");
+        important.type = "button";
+        important.className = "task-important-toggle";
+        important.setAttribute("aria-pressed", String(task.important));
+        important.setAttribute("aria-label", task.important ? `取消重要任务「${task.content}」` : `设为重要任务「${task.content}」`);
+        important.append(icon("star"));
+        important.addEventListener("click", () => void toggleChecklistTaskImportance(checklist.id, task.id));
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "task-remove-button";
+        remove.append(icon("trash"));
+        remove.setAttribute("aria-label", `删除任务「${task.content}」`);
+        remove.addEventListener("click", () => void removeChecklistTask(checklist.id, task.id));
+        item.append(important, remove);
+      }
+      list.append(item);
+    }
+    taskFrame.append(list);
+  }
+  card.append(taskFrame);
+
+  if (editingChecklist) {
+    const composer = document.createElement("form");
+    composer.className = "task-composer";
+    const input = document.createElement("input");
+    input.className = "task-composer-input";
+    input.dataset.taskInput = checklist.id;
+    input.maxLength = MAX_TASK_CONTENT_LENGTH;
+    input.placeholder = "添加一项任务";
+    input.setAttribute("aria-label", `为 ${checklist.name} 添加任务`);
+    const important = document.createElement("button");
+    important.type = "button";
+    important.className = "task-composer-important";
+    important.setAttribute("aria-pressed", "false");
+    important.setAttribute("aria-label", "将新任务设为重要");
+    important.title = "设为重要";
+    important.append(icon("star"));
+    important.addEventListener("click", () => {
+      const selected = important.getAttribute("aria-pressed") !== "true";
+      important.setAttribute("aria-pressed", String(selected));
+      important.setAttribute("aria-label", selected ? "取消新任务的重要标记" : "将新任务设为重要");
+      important.title = selected ? "已设为重要" : "设为重要";
+    });
+    const add = document.createElement("button");
+    add.type = "submit";
+    add.className = "task-add-button";
+    add.append(icon("plus"));
+    add.setAttribute("aria-label", "添加任务");
+    composer.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void addChecklistTask(checklist.id, input, important);
+    });
+    composer.append(input, important, add);
+
+    const footer = document.createElement("div");
+    footer.className = "checklist-edit-footer";
+    const dailyReset = document.createElement("button");
+    dailyReset.type = "button";
+    dailyReset.className = "checklist-daily-toggle";
+    dailyReset.setAttribute("aria-pressed", String(checklist.dailyReset));
+    dailyReset.setAttribute("aria-label", checklist.dailyReset ? "关闭每日重置" : "开启每日重置");
+    const dailyText = document.createElement("span");
+    dailyText.textContent = "每日重置";
+    const switchTrack = document.createElement("span");
+    switchTrack.className = "setting-switch";
+    switchTrack.setAttribute("aria-hidden", "true");
+    const switchKnob = document.createElement("span");
+    switchKnob.className = "setting-switch-knob";
+    switchTrack.append(switchKnob);
+    dailyReset.append(dailyText, switchTrack);
+    dailyReset.addEventListener("click", () => void toggleChecklistDailyReset(checklist.id));
+
+    const removeList = document.createElement("button");
+    removeList.type = "button";
+    removeList.className = "checklist-remove-button";
+    removeList.setAttribute("aria-label", `移除清单「${checklist.name}」`);
+    removeList.append(icon("trash"), document.createTextNode("移除清单"));
+    removeList.addEventListener("click", () => void removeChecklist(checklist.id));
+    footer.append(dailyReset, removeList);
+    card.append(composer, footer);
+  }
+
+  return card;
+}
+
+function renderChecklists(): void {
+  if (checklistCardDragState || checklistTaskDragState) return;
+  if (editingChecklistId && !checklists.some((checklist) => checklist.id === editingChecklistId)) {
+    editingChecklistId = null;
+  }
+  checklistGrid.replaceChildren(...checklists.map(createChecklistCard));
+  checklistGrid.hidden = checklists.length === 0;
+  checklistEmptyState.hidden = checklists.length > 0;
+}
+
+function formatDiaryTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  const datePart = DIARY_DATE_FORMATTER.format(date).replaceAll("/", ".");
+  const timePart = DIARY_TIME_FORMATTER.format(date);
+  return `${datePart} ${timePart}`;
+}
+
+function diaryTimeElement(label: string, value: string): HTMLTimeElement {
+  const time = document.createElement("time");
+  time.dateTime = value;
+  time.textContent = `${label} ${formatDiaryTimestamp(value)}`;
+  return time;
+}
+
+async function persistDiaryChanges(previous: DiaryEntry[], successMessage?: string): Promise<boolean> {
+  try {
+    await invoke("save_diaries", { diaries });
+    if (successMessage) showToast(successMessage);
+    return true;
+  } catch (error) {
+    diaries = previous;
+    renderDiaries();
+    showToast(errorMessage(error), true);
+    return false;
+  }
+}
+
+function openDiaryDialog(entry?: DiaryEntry): void {
+  diaryForm.reset();
+  diaryFormError.hidden = true;
+  diaryIdInput.value = entry?.id ?? "";
+  resetDiaryDeleteConfirmation();
+  diaryTitleInput.value = entry?.title ?? "";
+  diaryContentInput.value = entry?.content ?? "";
+  diaryDialogTitle.textContent = entry ? "修改这一页" : "记录此刻";
+  diaryDeleteButton.hidden = !entry;
+  diarySaveButton.textContent = entry ? "保存修改" : "保存";
+  diaryDialogTimes.replaceChildren();
+  diaryDialogTimes.hidden = !entry;
+  if (entry) {
+    diaryDialogTimes.append(
+      diaryTimeElement("创建", entry.createdAt),
+      diaryTimeElement("修改", entry.updatedAt),
+    );
+  }
+  diaryDialog.showModal();
+  window.setTimeout(() => diaryTitleInput.focus(), 0);
+}
+
+function closeDiaryDialog(): void {
+  resetDiaryDeleteConfirmation();
+  diaryDialog.close();
+  addDiaryButton.focus();
+}
+
+function resetDiaryDeleteConfirmation(): void {
+  diaryDeleteButton.classList.remove("is-confirming");
+  diaryDeleteButton.textContent = "移除";
+  const entry = diaries.find((candidate) => candidate.id === diaryIdInput.value);
+  diaryDeleteButton.setAttribute("aria-label", entry ? `移除日记「${entry.title}」` : "移除日记");
+}
+
+function finishClosingDiaryReader(): void {
+  window.clearTimeout(diaryReaderCloseTimer);
+  window.clearTimeout(diaryReaderSettleTimer);
+  diaryReaderCloseTimer = undefined;
+  diaryReaderSettleTimer = undefined;
+  if (diaryReaderDialog.open) diaryReaderDialog.close();
+  diaryReaderDialog.classList.remove("is-open", "is-closing", "is-settled");
+  diaryReaderDialog.style.removeProperty("--reader-shift-x");
+  diaryReaderDialog.style.removeProperty("--reader-shift-y");
+  diaryReaderDialog.style.removeProperty("--reader-scale");
+  const returnTarget = diaryReaderReturnTarget;
+  diaryReaderReturnTarget = null;
+  if (returnTarget?.isConnected) returnTarget.focus();
+}
+
+function closeDiaryReader(): void {
+  if (!diaryReaderDialog.open || diaryReaderDialog.classList.contains("is-closing")) return;
+  window.clearTimeout(diaryReaderSettleTimer);
+  diaryReaderSettleTimer = undefined;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    finishClosingDiaryReader();
+    return;
+  }
+  diaryReaderDialog.classList.remove("is-settled");
+  void diaryReaderDialog.offsetWidth;
+  diaryReaderDialog.classList.add("is-closing");
+  diaryReaderDialog.classList.remove("is-open");
+  diaryReaderCloseTimer = window.setTimeout(finishClosingDiaryReader, DIARY_READER_CLOSE_DELAY_MS);
+}
+
+function openDiaryReader(entry: DiaryEntry, sourceCard: HTMLElement): void {
+  window.clearTimeout(diaryReaderCloseTimer);
+  window.clearTimeout(diaryReaderSettleTimer);
+  diaryReaderCloseTimer = undefined;
+  diaryReaderSettleTimer = undefined;
+  diaryReaderReturnTarget = sourceCard;
+  diaryReaderTitle.textContent = entry.title;
+  diaryReaderTimes.replaceChildren(
+    diaryTimeElement("创建", entry.createdAt),
+    diaryTimeElement("修改", entry.updatedAt),
+  );
+  diaryReaderContent.textContent = entry.content;
+  diaryReaderDialog.classList.remove("is-open", "is-closing", "is-settled");
+  diaryReaderDialog.showModal();
+
+  const sourceRect = sourceCard.getBoundingClientRect();
+  const readerRect = diaryReaderDialog.getBoundingClientRect();
+  const sourceCenterX = sourceRect.left + sourceRect.width / 2;
+  const sourceCenterY = sourceRect.top + sourceRect.height / 2;
+  const readerCenterX = readerRect.left + readerRect.width / 2;
+  const readerCenterY = readerRect.top + readerRect.height / 2;
+  const scale = Math.max(0.48, Math.min(0.78, sourceRect.width / readerRect.width));
+  diaryReaderDialog.style.setProperty("--reader-shift-x", `${sourceCenterX - readerCenterX}px`);
+  diaryReaderDialog.style.setProperty("--reader-shift-y", `${sourceCenterY - readerCenterY}px`);
+  diaryReaderDialog.style.setProperty("--reader-scale", String(scale));
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    diaryReaderDialog.classList.add("is-open", "is-settled");
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      if (!diaryReaderDialog.open) return;
+      diaryReaderDialog.classList.add("is-open");
+      diaryReaderSettleTimer = window.setTimeout(settleDiaryReader, DIARY_READER_SETTLE_DELAY_MS);
+    });
+  });
+}
+
+function settleDiaryReader(): void {
+  window.clearTimeout(diaryReaderSettleTimer);
+  diaryReaderSettleTimer = undefined;
+  if (
+    diaryReaderDialog.open
+    && diaryReaderDialog.classList.contains("is-open")
+    && !diaryReaderDialog.classList.contains("is-closing")
+  ) {
+    diaryReaderDialog.classList.add("is-settled");
+  }
+}
+
+async function removeDiaryFromForm(): Promise<void> {
+  const existing = diaries.find((entry) => entry.id === diaryIdInput.value);
+  if (!existing) return;
+  if (!diaryDeleteButton.classList.contains("is-confirming")) {
+    diaryFormError.hidden = true;
+    diaryDeleteButton.classList.add("is-confirming");
+    diaryDeleteButton.textContent = "确认移除";
+    diaryDeleteButton.setAttribute("aria-label", `再次点击，确认移除日记「${existing.title}」`);
+    return;
+  }
+
+  const previous = diaries;
+  diaries = diaries.filter((entry) => entry.id !== existing.id);
+  renderDiaries();
+  if (await persistDiaryChanges(previous)) {
+    closeDiaryDialog();
+    showToast(`已移除「${existing.title}」`);
+  } else {
+    resetDiaryDeleteConfirmation();
+  }
+}
+
+async function saveDiaryFromForm(): Promise<void> {
+  const title = diaryTitleInput.value.trim();
+  const content = diaryContentInput.value.trim();
+  if (!title || !content) {
+    diaryFormError.textContent = !title ? "请为这一页写一个标题。" : "请写下这一刻的内容。";
+    diaryFormError.hidden = false;
+    return;
+  }
+  if (title.length > MAX_DIARY_TITLE_LENGTH || content.length > MAX_DIARY_CONTENT_LENGTH) {
+    diaryFormError.textContent = "这一页的文字太长了，请稍作删减。";
+    diaryFormError.hidden = false;
+    return;
+  }
+
+  const existing = diaries.find((entry) => entry.id === diaryIdInput.value);
+  if (existing && existing.title === title && existing.content === content) {
+    closeDiaryDialog();
+    return;
+  }
+
+  const previous = diaries;
+  const now = new Date().toISOString();
+  if (existing) {
+    diaries = diaries.map((entry) => entry.id === existing.id
+      ? { ...entry, title, content, updatedAt: now }
+      : entry);
+  } else {
+    diaries = [{ id: crypto.randomUUID(), title, content, createdAt: now, updatedAt: now }, ...diaries];
+  }
+  renderDiaries();
+  if (await persistDiaryChanges(previous)) {
+    closeDiaryDialog();
+    showToast(existing ? `已修改「${title}」` : `已记录「${title}」`);
+  }
+}
+
+function createDiaryCard(entry: DiaryEntry): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "diary-card";
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  card.setAttribute("aria-label", `浏览日记「${entry.title}」`);
+
+  const header = document.createElement("header");
+  header.className = "diary-card-heading";
+  const title = document.createElement("h3");
+  title.textContent = entry.title;
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "diary-edit-button";
+  edit.setAttribute("aria-label", `修改日记「${entry.title}」`);
+  edit.append(icon("edit"));
+  edit.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openDiaryDialog(entry);
+  });
+  header.append(title, edit);
+
+  const content = document.createElement("p");
+  content.className = "diary-card-content";
+  content.textContent = entry.content;
+
+  const times = document.createElement("footer");
+  times.className = "diary-card-times";
+  times.append(
+    diaryTimeElement("创建", entry.createdAt),
+    diaryTimeElement("修改", entry.updatedAt),
+  );
+  card.append(header, content, times);
+  card.addEventListener("click", () => openDiaryReader(entry, card));
+  card.addEventListener("keydown", (event) => {
+    if (event.target !== card || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    openDiaryReader(entry, card);
+  });
+  return card;
+}
+
+function renderDiaries(): void {
+  diaryGrid.replaceChildren(...diaries.map(createDiaryCard));
+  diaryGrid.hidden = diaries.length === 0;
+  diaryEmptyState.hidden = diaries.length > 0;
+}
+
+function clearShortcutCardDragState(): void {
+  const state = shortcutCardDragState;
+  if (!state) return;
+  clearLiveReorder(state.live);
+  shortcutCardDragState = null;
+}
+
+function beginShortcutCardDrag(
+  event: PointerEvent,
+  card: HTMLElement,
+  shortcut: AppShortcut,
+  handle: HTMLElement,
+): void {
+  if (event.button !== 0 || shortcutCardDragState || !(card.parentElement instanceof HTMLElement)) return;
+  const grid = card.parentElement;
+  const live = beginLiveReorder(
+    event,
+    card,
+    handle,
+    grid,
+    ".shortcut-card[data-shortcut-id]",
+    "grid",
+    "shortcut",
+  );
+  if (!live) return;
+  shortcutCardDragState = {
+    live,
+    previousOrder: [...grid.querySelectorAll<HTMLElement>(".shortcut-card[data-shortcut-id]")]
+      .map((item) => item.dataset.shortcutId)
+      .filter((id): id is string => Boolean(id)),
+    sleeping: shortcut.sleeping,
+  };
+}
+
+function moveShortcutCardDrag(event: PointerEvent): void {
+  const state = shortcutCardDragState;
+  if (!state) return;
+  moveLiveReorder(event, state.live);
+}
+
+async function finishShortcutCardDrag(event: PointerEvent): Promise<void> {
+  const state = shortcutCardDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+  const nextOrder = [...state.live.container.querySelectorAll<HTMLElement>(".shortcut-card[data-shortcut-id]")]
+    .map((item) => item.dataset.shortcutId)
+    .filter((id): id is string => Boolean(id));
+  clearShortcutCardDragState();
+  if (!hasSameIds(nextOrder, state.previousOrder)) {
+    render();
+    showToast("未能完成排序，请再试一次。", true);
+    return;
+  }
+  if (hasSameOrder(nextOrder, state.previousOrder)) return;
+
+  const previous = shortcuts;
+  const byId = new Map(shortcuts.map((shortcut) => [shortcut.id, shortcut]));
+  const reorderedZone = nextOrder.map((id) => byId.get(id)).filter((shortcut): shortcut is AppShortcut => Boolean(shortcut));
+  let zoneIndex = 0;
+  shortcuts = shortcuts.map((shortcut) => shortcut.sleeping === state.sleeping ? reorderedZone[zoneIndex++] : shortcut);
+  render();
+  try {
+    await persist();
+  } catch (error) {
+    shortcuts = previous;
+    render();
+    showToast(errorMessage(error), true);
+  }
+}
+
+function cancelShortcutCardDrag(event: PointerEvent): void {
+  const state = shortcutCardDragState;
+  if (!state || state.live.pointerId !== event.pointerId) return;
+  clearShortcutCardDragState();
+  render();
+}
+
 function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   const card = document.createElement("button");
   const kind = shortcutKind(shortcut);
@@ -472,6 +1826,7 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   const running = isShortcutRunning(shortcut);
   card.type = "button";
   card.className = `shortcut-card icon-${shortcut.icon}`;
+  card.dataset.shortcutId = shortcut.id;
   if (shortcut.sleeping) card.classList.add("sleeping-card");
   if (kind === "web") card.classList.add("online-card");
   if (running) card.classList.add("running-card");
@@ -513,6 +1868,21 @@ function createShortcutCard(shortcut: AppShortcut): HTMLElement {
   name.className = "shortcut-name";
   name.textContent = shortcut.name;
   card.append(iconHolder, name);
+
+  if (editing) {
+    card.classList.add("is-reorderable");
+    const dragHandle = document.createElement("span");
+    dragHandle.className = "shortcut-drag-handle reorder-handle";
+    dragHandle.title = "拖动入口排序";
+    dragHandle.setAttribute("aria-label", `拖动入口「${shortcut.name}」排序`);
+    dragHandle.append(icon("grip"));
+    dragHandle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    dragHandle.addEventListener("pointerdown", (event) => beginShortcutCardDrag(event, card, shortcut, dragHandle));
+    card.append(dragHandle);
+  }
 
   if (scheduling) {
     const summary = document.createElement("span");
@@ -582,6 +1952,7 @@ function createAddCard(): HTMLElement {
 }
 
 function render(): void {
+  if (shortcutCardDragState) return;
   const awake = shortcuts.filter((shortcut) => !shortcut.sleeping);
   const launchable = awake.filter((shortcut) => !isShortcutRunning(shortcut));
   const sleeping = shortcuts.filter((shortcut) => shortcut.sleeping);
@@ -618,6 +1989,7 @@ function render(): void {
         : "全开";
   sleepAllButton.disabled = shortcuts.length === 0 || shortcuts.every((shortcut) => shortcut.sleeping);
   wakeAllButton.disabled = shortcuts.length === 0 || shortcuts.every((shortcut) => !shortcut.sleeping);
+  renderWorkspaceModules();
 }
 
 async function persist(): Promise<void> {
@@ -1145,7 +2517,7 @@ async function checkForUpdates(): Promise<void> {
     availableUpdate = update;
     updateVersion.textContent = `Serenook ${update.version}`;
     renderUpdateNotes(update.body?.trim() || "这一版带来了一些安静而细小的改进。");
-    updateStatus.textContent = "准备好时，可以在这里完成更新。";
+    updateStatus.textContent = "准备好后，即可更新。";
     updateInstallButton.disabled = false;
     updateLaterButton.disabled = false;
     updateDialog.showModal();
@@ -1156,26 +2528,31 @@ async function checkForUpdates(): Promise<void> {
 
 function renderUpdateNotes(notes: string): void {
   const content: HTMLElement[] = [];
-  let list: HTMLDivElement | undefined;
+  let list: HTMLUListElement | undefined;
 
-  for (const line of notes.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
-    if (line.startsWith("•")) {
+  for (const sourceLine of notes.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
+    const line = sourceLine.replace(/\\$/, "");
+    const listItem = line.match(/^[•*-]\s*(.+)$/)?.[1];
+    if (listItem) {
       if (!list) {
-        list = document.createElement("div");
+        list = document.createElement("ul");
         list.className = "update-note-list";
         content.push(list);
       }
-      const item = document.createElement("p");
+      const item = document.createElement("li");
       item.className = "update-note-line";
-      item.textContent = line;
+      item.textContent = listItem;
       list.append(item);
       continue;
     }
 
     list = undefined;
     const copy = document.createElement("p");
-    copy.className = "update-note-copy";
-    copy.textContent = line;
+    const plainLine = line.replace(/^#{1,6}\s+/, "");
+    copy.className = /^(更新内容|本次更新)[:：]?$/.test(plainLine)
+      ? "update-note-heading"
+      : "update-note-copy";
+    copy.textContent = plainLine;
     content.push(copy);
   }
 
@@ -1302,9 +2679,11 @@ function revealAnniversaryMessage(): void {
 
 async function initialize(): Promise<void> {
   hydrateStaticIcons();
-  const [appsResult, settingsResult] = await Promise.allSettled([
+  const [appsResult, settingsResult, checklistsResult, diariesResult] = await Promise.allSettled([
     invoke<AppShortcut[]>("load_apps"),
     invoke<AppSettings>("load_settings"),
+    invoke<Checklist[]>("load_checklists"),
+    invoke<DiaryEntry[]>("load_diaries"),
   ]);
 
   if (appsResult.status === "fulfilled") shortcuts = applyWeeklySchedules(appsResult.value, new Date().getDay());
@@ -1315,15 +2694,31 @@ async function initialize(): Promise<void> {
       ...settingsResult.value,
       anniversaryDate: settingsResult.value.anniversaryDate ?? null,
       anniversaryName: settingsResult.value.anniversaryName?.trim() || DEFAULT_ANNIVERSARY_NAME,
+      workspaceOrder: normalizeWorkspaceOrder(settingsResult.value.workspaceOrder),
+      collapsedModules: normalizeCollapsedModules(settingsResult.value.collapsedModules),
     };
   }
   else showToast(errorMessage(settingsResult.reason), true);
 
+  if (checklistsResult.status === "fulfilled") checklists = checklistsResult.value;
+  else showToast(errorMessage(checklistsResult.reason), true);
+
+  if (diariesResult.status === "fulfilled") diaries = diariesResult.value;
+  else showToast(errorMessage(diariesResult.reason), true);
+
+  const checklistsBeforeReset = checklists;
+  const checklistResetNeeded = applyDailyChecklistResets();
+
+  applyWorkspaceOrder();
   scheduleGreetingUpdate();
   scheduleDailyQuoteUpdate();
   render();
+  renderChecklists();
+  renderDiaries();
   renderStartupSetting();
   renderThemeSetting();
+  if (checklistResetNeeded) await persistChecklistChanges(checklistsBeforeReset);
+  scheduleChecklistReset();
   if (!settings.hasCompletedWelcome) await openWelcomeOnce();
   void hydrateAppIcons(shortcuts);
   await refreshRunningApps(true);
@@ -1335,6 +2730,30 @@ editButton.addEventListener("click", () => {
   editing = !editing;
   if (editing) scheduling = false;
   render();
+});
+shortcutsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("shortcuts"));
+checklistsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("checklists"));
+diariesModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("diaries"));
+document.querySelectorAll<HTMLButtonElement>(".module-drag-handle").forEach((handle) => {
+  handle.addEventListener("pointerdown", beginModuleDrag);
+});
+window.addEventListener("pointermove", (event) => {
+  moveModuleDrag(event);
+  moveChecklistCardDrag(event);
+  moveChecklistTaskDrag(event);
+  moveShortcutCardDrag(event);
+});
+window.addEventListener("pointerup", (event) => {
+  void finishModuleDrag(event);
+  void finishChecklistCardDrag(event);
+  void finishChecklistTaskDrag(event);
+  void finishShortcutCardDrag(event);
+});
+window.addEventListener("pointercancel", (event) => {
+  cancelModuleDrag(event);
+  cancelChecklistCardDrag(event);
+  cancelChecklistTaskDrag(event);
+  cancelShortcutCardDrag(event);
 });
 scheduleButton.addEventListener("click", () => {
   scheduling = !scheduling;
@@ -1390,6 +2809,44 @@ anniversaryForm.addEventListener("submit", (event) => {
   void saveAnniversary();
 });
 element<HTMLButtonElement>("empty-add-button").addEventListener("click", () => openEditor());
+addChecklistButton.addEventListener("click", openChecklistDialog);
+emptyChecklistAddButton.addEventListener("click", openChecklistDialog);
+element<HTMLButtonElement>("checklist-dialog-close-button").addEventListener("click", closeChecklistDialog);
+element<HTMLButtonElement>("checklist-cancel-button").addEventListener("click", closeChecklistDialog);
+checklistForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void addChecklistFromForm();
+});
+addDiaryButton.addEventListener("click", () => openDiaryDialog());
+emptyDiaryAddButton.addEventListener("click", () => openDiaryDialog());
+element<HTMLButtonElement>("diary-dialog-close-button").addEventListener("click", closeDiaryDialog);
+element<HTMLButtonElement>("diary-cancel-button").addEventListener("click", closeDiaryDialog);
+diaryDeleteButton.addEventListener("click", () => void removeDiaryFromForm());
+diaryTitleInput.addEventListener("input", resetDiaryDeleteConfirmation);
+diaryContentInput.addEventListener("input", resetDiaryDeleteConfirmation);
+diaryForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveDiaryFromForm();
+});
+element<HTMLButtonElement>("diary-reader-close-button").addEventListener("click", closeDiaryReader);
+diaryReaderDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeDiaryReader();
+});
+diaryReaderDialog.addEventListener("click", (event) => {
+  if (event.target === diaryReaderDialog) closeDiaryReader();
+});
+diaryReaderDialog.addEventListener("transitionend", (event) => {
+  if (
+    event.target === diaryReaderDialog
+    && event.propertyName === "transform"
+    && diaryReaderDialog.open
+    && diaryReaderDialog.classList.contains("is-open")
+    && !diaryReaderDialog.classList.contains("is-closing")
+  ) {
+    settleDiaryReader();
+  }
+});
 browseButton.addEventListener("click", () => void chooseTarget());
 form.querySelectorAll<HTMLInputElement>('input[name="shortcut-kind"]').forEach((input) => {
   input.addEventListener("change", () => setTargetMode(selectedShortcutKind(), true));
@@ -1418,11 +2875,15 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("focus", () => {
   scheduleGreetingUpdate();
   scheduleDailyQuoteUpdate();
+  void refreshDailyChecklists();
 });
 window.addEventListener("beforeunload", () => {
   window.clearInterval(runningPollTimer);
   window.clearTimeout(greetingTimer);
   window.clearTimeout(dailyQuoteTimer);
+  window.clearTimeout(checklistResetTimer);
+  window.clearTimeout(diaryReaderCloseTimer);
+  window.clearTimeout(diaryReaderSettleTimer);
 });
 element<HTMLButtonElement>("minimize-button").addEventListener("click", () => void appWindow.minimize());
 element<HTMLButtonElement>("maximize-button").addEventListener("click", () => void appWindow.toggleMaximize());

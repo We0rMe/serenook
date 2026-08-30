@@ -35,42 +35,118 @@
           <div class="intro-copy">
             <h1 id="page-title">今天，想从哪里开始？</h1>
           </div>
-          <div class="intro-actions">
-            <button id="launch-all-button" class="launch-all-button" type="button" hidden>
-              <span class="button-icon" data-icon="play" aria-hidden="true"></span>
-              <span id="launch-all-label">全开</span>
-            </button>
-            <button id="schedule-button" class="edit-button schedule-button" type="button" aria-pressed="false">
-              <span class="button-icon" data-icon="calendar" aria-hidden="true"></span>
-              <span class="schedule-label">作息</span>
-            </button>
-            <button id="edit-button" class="edit-button" type="button" aria-pressed="false">
-              <span class="button-icon" data-icon="edit" aria-hidden="true"></span>
-              <span class="edit-label">编辑</span>
-            </button>
-          </div>
         </section>
 
-        <section id="shortcut-grid" class="shortcut-grid" aria-label="常用入口"></section>
+        <section id="workspace-sections" class="workspace-sections" aria-label="Serenook 工作区">
+          <section id="shortcuts-module" class="workspace-module" data-module-id="shortcuts" aria-labelledby="shortcuts-module-title">
+            <header class="workspace-module-heading">
+              <button class="module-drag-handle reorder-handle" type="button" data-module-id="shortcuts" aria-label="拖动常用入口工作区排序" title="拖动排序">
+                <span data-icon="grip" aria-hidden="true"></span>
+              </button>
+              <button id="shortcuts-module-toggle" class="workspace-module-toggle" type="button" aria-expanded="true">
+                <strong id="shortcuts-module-title" class="workspace-module-title">常用入口</strong>
+                <span class="workspace-module-chevron" data-icon="chevron" aria-hidden="true"></span>
+              </button>
+            </header>
+            <div id="shortcuts-module-content" class="workspace-module-content is-open" aria-hidden="false">
+              <div class="workspace-module-content-inner">
+                <div class="entry-heading">
+                  <div class="entry-actions">
+                    <button id="launch-all-button" class="launch-all-button" type="button" hidden>
+                      <span class="button-icon" data-icon="play" aria-hidden="true"></span>
+                      <span id="launch-all-label">全开</span>
+                    </button>
+                    <button id="schedule-button" class="edit-button schedule-button" type="button" aria-pressed="false">
+                      <span class="button-icon" data-icon="calendar" aria-hidden="true"></span>
+                      <span class="schedule-label">作息</span>
+                    </button>
+                    <button id="edit-button" class="edit-button" type="button" aria-pressed="false">
+                      <span class="button-icon" data-icon="edit" aria-hidden="true"></span>
+                      <span class="edit-label">编辑</span>
+                    </button>
+                  </div>
+                </div>
 
-        <section id="empty-state" class="empty-state" hidden>
-          <span class="empty-icon" data-icon="sparkles" aria-hidden="true"></span>
-          <p>这里还很安静，放入第一个常用入口吧。</p>
-          <button id="empty-add-button" class="primary-button" type="button">添加应用</button>
-        </section>
+                <section id="shortcut-grid" class="shortcut-grid" aria-label="苏醒中的常用入口"></section>
 
-        <section id="sleep-section" class="sleep-section" hidden aria-labelledby="sleep-section-title">
-          <button id="sleep-toggle" class="sleep-toggle" type="button" aria-expanded="false">
-            <span class="sleep-toggle-icon" data-icon="moon" aria-hidden="true"></span>
-            <span id="sleep-section-title">睡眠区</span>
-            <span id="sleep-count" class="sleep-count">0</span>
-            <span class="sleep-chevron" data-icon="chevron" aria-hidden="true"></span>
-          </button>
-          <div id="sleep-content" class="sleep-content" aria-hidden="true" inert>
-            <div class="sleep-content-inner">
-              <div id="sleep-grid" class="shortcut-grid sleep-grid" aria-label="睡眠中的入口"></div>
+                <section id="empty-state" class="empty-state" hidden>
+                  <span class="empty-icon" data-icon="sparkles" aria-hidden="true"></span>
+                  <p>这里还很安静，放入第一个常用入口吧。</p>
+                  <button id="empty-add-button" class="primary-button" type="button">添加应用</button>
+                </section>
+
+                <section id="sleep-section" class="sleep-section" hidden aria-labelledby="sleep-section-title">
+                  <button id="sleep-toggle" class="sleep-toggle" type="button" aria-expanded="false">
+                    <span class="sleep-toggle-icon" data-icon="moon" aria-hidden="true"></span>
+                    <span id="sleep-section-title">睡眠区</span>
+                    <span id="sleep-count" class="sleep-count">0</span>
+                    <span class="sleep-chevron" data-icon="chevron" aria-hidden="true"></span>
+                  </button>
+                  <div id="sleep-content" class="sleep-content" aria-hidden="true" inert>
+                    <div class="sleep-content-inner">
+                      <div id="sleep-grid" class="shortcut-grid sleep-grid" aria-label="睡眠中的入口"></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
             </div>
-          </div>
+          </section>
+
+          <section id="checklists-module" class="workspace-module" data-module-id="checklists" aria-labelledby="checklists-module-title">
+            <header class="workspace-module-heading">
+              <button class="module-drag-handle reorder-handle" type="button" data-module-id="checklists" aria-label="拖动清单工作区排序" title="拖动排序">
+                <span data-icon="grip" aria-hidden="true"></span>
+              </button>
+              <button id="checklists-module-toggle" class="workspace-module-toggle" type="button" aria-expanded="true">
+                <strong id="checklists-module-title" class="workspace-module-title">清单</strong>
+                <span class="workspace-module-chevron" data-icon="chevron" aria-hidden="true"></span>
+              </button>
+            </header>
+            <div id="checklists-module-content" class="workspace-module-content is-open" aria-hidden="false">
+              <div class="workspace-module-content-inner">
+                <div class="checklist-workspace-heading">
+                  <button id="add-checklist-button" class="section-add-button" type="button">
+                    <span data-icon="plus" aria-hidden="true"></span>
+                    <span>添加清单</span>
+                  </button>
+                </div>
+                <div id="checklist-grid" class="checklist-grid" aria-label="我的清单"></div>
+                <section id="checklist-empty-state" class="checklist-empty-state" hidden>
+                  <span data-icon="checklist" aria-hidden="true"></span>
+                  <p>还没有清单，先为一件事留个位置。</p>
+                  <button id="empty-checklist-add-button" class="secondary-button" type="button">添加第一张清单</button>
+                </section>
+              </div>
+            </div>
+          </section>
+
+          <section id="diaries-module" class="workspace-module" data-module-id="diaries" aria-labelledby="diaries-module-title">
+            <header class="workspace-module-heading">
+              <button class="module-drag-handle reorder-handle" type="button" data-module-id="diaries" aria-label="拖动日记工作区排序" title="拖动排序">
+                <span data-icon="grip" aria-hidden="true"></span>
+              </button>
+              <button id="diaries-module-toggle" class="workspace-module-toggle" type="button" aria-expanded="true">
+                <strong id="diaries-module-title" class="workspace-module-title">日记</strong>
+                <span class="workspace-module-chevron" data-icon="chevron" aria-hidden="true"></span>
+              </button>
+            </header>
+            <div id="diaries-module-content" class="workspace-module-content is-open" aria-hidden="false">
+              <div class="workspace-module-content-inner">
+                <div class="diary-workspace-heading">
+                  <button id="add-diary-button" class="section-add-button" type="button">
+                    <span data-icon="plus" aria-hidden="true"></span>
+                    <span>记录此刻</span>
+                  </button>
+                </div>
+                <div id="diary-grid" class="diary-grid" aria-label="我的日记"></div>
+                <section id="diary-empty-state" class="diary-empty-state" hidden>
+                  <span data-icon="book" aria-hidden="true"></span>
+                  <p>还没有文字，先留下此刻。</p>
+                  <button id="empty-diary-add-button" class="secondary-button" type="button">记录第一篇</button>
+                </section>
+              </div>
+            </div>
+          </section>
         </section>
 
         <footer class="footer-note">
@@ -233,44 +309,52 @@
               <span>返回工作台</span>
             </button>
             <h2 id="guide-title">你好，这里是 Serenook。</h2>
-            <p>让常用入口停靠在一处，也让每一次开始少一点寻找，多一点从容。</p>
+            <p>让入口、清单与日记停靠在一处，也让每一次开始少一点寻找，多一点从容。</p>
           </header>
 
           <div class="guide-content">
             <article class="guide-block guide-intro-block">
               <span class="guide-number">01</span>
               <div>
-                <h3>一处安静的小角落</h3>
-                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。它只把常用入口轻轻收在一起，需要时，为你打开通往下一件事的门。</p>
+                <h3>一处安静的工作台</h3>
+                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。入口、清单与日记各有一处落脚；轻点标题即可收起，拖动左侧把手可以调整顺序。</p>
               </div>
             </article>
 
             <article class="guide-block">
               <span class="guide-number">02</span>
               <div>
-                <h3>放入与打开</h3>
-                <p>进入“编辑”，添加应用、文档、文件夹或网址。轻点卡片即可打开；“全开”会避开睡眠中与已运行的应用，依次打开其余入口。</p>
+                <h3>常用入口</h3>
+                <p>进入“编辑”后，可添加应用、文档、文件夹或网址，也可拖动卡片调整顺序。“全开”会避开睡眠中与已运行的应用。</p>
               </div>
             </article>
 
             <article class="guide-block">
               <span class="guide-number">03</span>
               <div>
-                <h3>睡眠与作息</h3>
-                <p>暂时不用的入口可以进入睡眠区，不再参与“全开”。在“作息”里选好星期，它会在对应的日子随 Serenook 苏醒。</p>
+                <h3>清单</h3>
+                <p>用铅笔进入编辑后，可写下、修改、排序或删除任务；重要任务以星光标记完成状态，也可每天重新开始。</p>
               </div>
             </article>
 
             <article class="guide-block">
               <span class="guide-number">04</span>
               <div>
-                <h3>日子各有回声</h3>
-                <p>问候会随星期、时段与节日而变，右下角的日签每日更替。明暗、纪念日与随电脑启动，仍可按你的习惯调整。</p>
+                <h3>日记</h3>
+                <p>选择“记录此刻”，写下标题与正文。轻点卡片安静阅读，右上角铅笔可以修改或移除；时间也会被一并留下。</p>
               </div>
             </article>
 
             <article class="guide-block">
               <span class="guide-number">05</span>
+              <div>
+                <h3>日子各有回声</h3>
+                <p>问候会随星期、时段与节日而变，右下角的日签每日更替。明暗、纪念日与随电脑启动，也都可以按习惯调整。</p>
+              </div>
+            </article>
+
+            <article class="guide-block">
+              <span class="guide-number">06</span>
               <div>
                 <h3>更新</h3>
                 <p>Serenook 会在启动后自查新版本。发现更新时，你可以先读完说明，再选择稍后处理或立即安装。</p>
@@ -374,11 +458,81 @@
       </form>
     </dialog>
 
+    <dialog id="checklist-dialog" class="shortcut-dialog checklist-dialog">
+      <form id="checklist-form" method="dialog" novalidate>
+        <header class="dialog-heading">
+          <div>
+            <span class="dialog-kicker">NEW LIST</span>
+            <h2>添一张清单</h2>
+          </div>
+          <button id="checklist-dialog-close-button" class="dialog-close-button" type="button" aria-label="关闭">
+            <span data-icon="close" aria-hidden="true"></span>
+          </button>
+        </header>
+        <label for="checklist-name-input">名称</label>
+        <input id="checklist-name-input" type="text" maxlength="32" autocomplete="off" placeholder="例如：今天" required />
+        <label class="checklist-reset-option" for="checklist-daily-reset-input">
+          <input id="checklist-daily-reset-input" type="checkbox" />
+          <span class="checklist-reset-copy">
+            <strong>每天重新开始</strong>
+            <small>每日首次打开时，清除任务的完成状态</small>
+          </span>
+          <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+        </label>
+        <p id="checklist-form-error" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <span class="dialog-spacer"></span>
+          <button id="checklist-cancel-button" class="secondary-button" type="button">取消</button>
+          <button class="primary-button" type="submit">添加</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="diary-dialog" class="shortcut-dialog diary-dialog">
+      <form id="diary-form" method="dialog" novalidate>
+        <header class="dialog-heading">
+          <div>
+            <span class="dialog-kicker">A QUIET MOMENT</span>
+            <h2 id="diary-dialog-title">记录此刻</h2>
+          </div>
+          <button id="diary-dialog-close-button" class="dialog-close-button" type="button" aria-label="关闭">
+            <span data-icon="close" aria-hidden="true"></span>
+          </button>
+        </header>
+        <input id="diary-id-input" type="hidden" />
+        <label for="diary-title-input">标题</label>
+        <input id="diary-title-input" type="text" maxlength="80" autocomplete="off" placeholder="为此刻留一个名字" required />
+        <label for="diary-content-input">内容</label>
+        <textarea id="diary-content-input" maxlength="5000" rows="9" placeholder="写下正在发生的事，或此刻的心绪。" required></textarea>
+        <div id="diary-dialog-times" class="diary-dialog-times" hidden></div>
+        <p id="diary-form-error" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button id="diary-delete-button" class="delete-button diary-delete-button" type="button" hidden>移除</button>
+          <span class="dialog-spacer"></span>
+          <button id="diary-cancel-button" class="secondary-button" type="button">取消</button>
+          <button id="diary-save-button" class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="diary-reader-dialog" class="diary-reader-dialog" aria-labelledby="diary-reader-title">
+      <button id="diary-reader-close-button" class="dialog-close-button diary-reader-close-button" type="button" aria-label="关闭日记">
+        <span data-icon="close" aria-hidden="true"></span>
+      </button>
+      <article class="diary-reader-sheet">
+        <header class="diary-reader-heading">
+          <h2 id="diary-reader-title"></h2>
+          <div id="diary-reader-times" class="diary-reader-times"></div>
+        </header>
+        <div id="diary-reader-content" class="diary-reader-content"></div>
+      </article>
+    </dialog>
+
     <dialog id="update-dialog" class="shortcut-dialog update-dialog">
       <section class="update-card" aria-labelledby="update-title">
         <span class="update-mark" data-icon="sparkles" aria-hidden="true"></span>
-        <span class="dialog-kicker">A SMALL RENEWAL</span>
-        <h2 id="update-title">有一个新版本，正在等你。</h2>
+        <span class="dialog-kicker">SERENOOK UPDATE</span>
+        <h2 id="update-title">发现新版本</h2>
         <strong id="update-version" class="update-version"></strong>
         <div id="update-notes" class="update-notes"></div>
         <p id="update-status" class="update-status" role="status" aria-live="polite"></p>

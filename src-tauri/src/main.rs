@@ -44,8 +44,15 @@ use windows::{
 };
 
 const MAX_SHORTCUTS: usize = 40;
+const MAX_CHECKLISTS: usize = 24;
+const MAX_TASKS_PER_CHECKLIST: usize = 100;
+const MAX_CHECKLIST_NAME_CHARACTERS: usize = 32;
+const MAX_TASK_CONTENT_CHARACTERS: usize = 200;
+const MAX_DIARY_TITLE_CHARACTERS: usize = 80;
+const MAX_DIARY_CONTENT_CHARACTERS: usize = 5_000;
 const MAX_ANNIVERSARY_NAME_CHARACTERS: usize = 7;
 const DEFAULT_ANNIVERSARY_NAME: &str = "Love";
+const WORKSPACE_MODULES: [&str; 3] = ["shortcuts", "checklists", "diaries"];
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "exe", "lnk", "bat", "cmd", "url", "txt", "md", "rtf", "pdf", "xps", "doc", "docx", "docm",
     "odt", "wps", "csv", "xls", "xlsx", "xlsm", "ods", "et", "ppt", "pptx", "pptm", "odp", "dps",
@@ -91,6 +98,40 @@ struct AppShortcut {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ChecklistTask {
+    id: String,
+    content: String,
+    #[serde(default)]
+    completed: bool,
+    #[serde(default)]
+    important: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Checklist {
+    id: String,
+    name: String,
+    #[serde(default)]
+    daily_reset: bool,
+    #[serde(default)]
+    last_reset_date: Option<String>,
+    #[serde(default)]
+    tasks: Vec<ChecklistTask>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiaryEntry {
+    id: String,
+    title: String,
+    content: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AppSettings {
     #[serde(default)]
     launch_on_startup: bool,
@@ -102,6 +143,10 @@ struct AppSettings {
     anniversary_date: Option<String>,
     #[serde(default = "default_anniversary_name")]
     anniversary_name: String,
+    #[serde(default = "default_workspace_order")]
+    workspace_order: Vec<String>,
+    #[serde(default)]
+    collapsed_modules: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -121,6 +166,30 @@ fn default_anniversary_name() -> String {
     DEFAULT_ANNIVERSARY_NAME.into()
 }
 
+fn default_workspace_order() -> Vec<String> {
+    WORKSPACE_MODULES
+        .iter()
+        .map(|module| (*module).to_string())
+        .collect()
+}
+
+fn normalize_workspace_preferences(settings: &mut AppSettings) {
+    let mut seen = HashSet::new();
+    settings.workspace_order.retain(|module| {
+        WORKSPACE_MODULES.contains(&module.as_str()) && seen.insert(module.clone())
+    });
+    for module in WORKSPACE_MODULES {
+        if seen.insert(module.to_string()) {
+            settings.workspace_order.push(module.to_string());
+        }
+    }
+
+    let mut collapsed = HashSet::new();
+    settings.collapsed_modules.retain(|module| {
+        WORKSPACE_MODULES.contains(&module.as_str()) && collapsed.insert(module.clone())
+    });
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -129,6 +198,8 @@ impl Default for AppSettings {
             theme: ThemePreference::System,
             anniversary_date: None,
             anniversary_name: default_anniversary_name(),
+            workspace_order: default_workspace_order(),
+            collapsed_modules: Vec::new(),
         }
     }
 }
@@ -148,6 +219,14 @@ fn shortcuts_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(config_directory(app)?.join("settings.json"))
+}
+
+fn checklists_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(config_directory(app)?.join("checklists.json"))
+}
+
+fn diaries_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(config_directory(app)?.join("diaries.json"))
 }
 
 fn wide_string(value: &OsStr) -> Vec<u16> {
@@ -433,6 +512,107 @@ fn validate_shortcuts(shortcuts: &[AppShortcut]) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_checklists(checklists: &[Checklist]) -> Result<(), String> {
+    if checklists.len() > MAX_CHECKLISTS {
+        return Err(format!("最多可以保存 {MAX_CHECKLISTS} 个清单。"));
+    }
+
+    let mut checklist_ids = HashSet::with_capacity(checklists.len());
+    for checklist in checklists {
+        if checklist.id.trim().is_empty() || !checklist_ids.insert(checklist.id.as_str()) {
+            return Err("清单标识无效或重复。".into());
+        }
+        let name = checklist.name.trim();
+        if name.is_empty() || name.chars().count() > MAX_CHECKLIST_NAME_CHARACTERS {
+            return Err(format!(
+                "清单名称应为 1 到 {MAX_CHECKLIST_NAME_CHARACTERS} 个字符。"
+            ));
+        }
+        if checklist.tasks.len() > MAX_TASKS_PER_CHECKLIST {
+            return Err(format!(
+                "每个清单最多可以保存 {MAX_TASKS_PER_CHECKLIST} 个任务。"
+            ));
+        }
+        if checklist
+            .last_reset_date
+            .as_deref()
+            .is_some_and(|date| !is_valid_calendar_date(date))
+        {
+            return Err("清单的重置日期无效。".into());
+        }
+
+        let mut task_ids = HashSet::with_capacity(checklist.tasks.len());
+        for task in &checklist.tasks {
+            if task.id.trim().is_empty() || !task_ids.insert(task.id.as_str()) {
+                return Err("任务标识无效或重复。".into());
+            }
+            let content = task.content.trim();
+            if content.is_empty() || content.chars().count() > MAX_TASK_CONTENT_CHARACTERS {
+                return Err(format!(
+                    "任务内容应为 1 到 {MAX_TASK_CONTENT_CHARACTERS} 个字符。"
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn is_valid_utc_timestamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 24
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+        || bytes[19] != b'.'
+        || bytes[23] != b'Z'
+        || !bytes[0..4].iter().all(u8::is_ascii_digit)
+        || !bytes[5..7].iter().all(u8::is_ascii_digit)
+        || !bytes[8..10].iter().all(u8::is_ascii_digit)
+        || !bytes[11..13].iter().all(u8::is_ascii_digit)
+        || !bytes[14..16].iter().all(u8::is_ascii_digit)
+        || !bytes[17..19].iter().all(u8::is_ascii_digit)
+        || !bytes[20..23].iter().all(u8::is_ascii_digit)
+        || !is_valid_calendar_date(&value[0..10])
+    {
+        return false;
+    }
+    let hour = value[11..13].parse::<u8>().unwrap_or(24);
+    let minute = value[14..16].parse::<u8>().unwrap_or(60);
+    let second = value[17..19].parse::<u8>().unwrap_or(60);
+    hour < 24 && minute < 60 && second < 60
+}
+
+fn validate_diaries(diaries: &[DiaryEntry]) -> Result<(), String> {
+    let mut ids = HashSet::with_capacity(diaries.len());
+    for entry in diaries {
+        if entry.id.trim().is_empty() || !ids.insert(entry.id.as_str()) {
+            return Err("日记标识无效或重复。".into());
+        }
+        let title = entry.title.trim();
+        if title.is_empty() || title.chars().count() > MAX_DIARY_TITLE_CHARACTERS {
+            return Err(format!(
+                "日记标题应为 1 到 {MAX_DIARY_TITLE_CHARACTERS} 个字符。"
+            ));
+        }
+        let content = entry.content.trim();
+        if content.is_empty() || content.chars().count() > MAX_DIARY_CONTENT_CHARACTERS {
+            return Err(format!(
+                "日记内容应为 1 到 {MAX_DIARY_CONTENT_CHARACTERS} 个字符。"
+            ));
+        }
+        if !is_valid_utc_timestamp(&entry.created_at)
+            || !is_valid_utc_timestamp(&entry.updated_at)
+            || entry.updated_at < entry.created_at
+        {
+            return Err("日记时间无效。".into());
+        }
+    }
+    Ok(())
+}
+
 fn is_valid_calendar_date(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 10
@@ -484,6 +664,31 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
         return Err(format!(
             "纪念日名称应为 1 到 {MAX_ANNIVERSARY_NAME_CHARACTERS} 个英文字母。"
         ));
+    }
+    let workspace_order: HashSet<&str> = settings
+        .workspace_order
+        .iter()
+        .map(String::as_str)
+        .collect();
+    if settings.workspace_order.len() != WORKSPACE_MODULES.len()
+        || workspace_order.len() != WORKSPACE_MODULES.len()
+        || workspace_order
+            .iter()
+            .any(|module| !WORKSPACE_MODULES.contains(module))
+    {
+        return Err("工作区顺序无效。".into());
+    }
+    let collapsed_modules: HashSet<&str> = settings
+        .collapsed_modules
+        .iter()
+        .map(String::as_str)
+        .collect();
+    if collapsed_modules.len() != settings.collapsed_modules.len()
+        || collapsed_modules
+            .iter()
+            .any(|module| !WORKSPACE_MODULES.contains(module))
+    {
+        return Err("工作区折叠状态无效。".into());
     }
     Ok(())
 }
@@ -746,6 +951,60 @@ fn save_apps(app: AppHandle, shortcuts: Vec<AppShortcut>) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn load_checklists(app: AppHandle) -> Result<Vec<Checklist>, String> {
+    let path = checklists_path(&app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = fs::read_to_string(path).map_err(|error| format!("无法读取清单：{error}"))?;
+    let checklists: Vec<Checklist> =
+        serde_json::from_str(&content).map_err(|error| format!("清单格式无效：{error}"))?;
+    validate_checklists(&checklists)?;
+    Ok(checklists)
+}
+
+#[tauri::command]
+fn save_checklists(app: AppHandle, mut checklists: Vec<Checklist>) -> Result<(), String> {
+    for checklist in &mut checklists {
+        checklist.name = checklist.name.trim().to_string();
+        for task in &mut checklist.tasks {
+            task.content = task.content.trim().to_string();
+        }
+    }
+    validate_checklists(&checklists)?;
+    let content = serde_json::to_string_pretty(&checklists)
+        .map_err(|error| format!("无法整理清单：{error}"))?;
+    fs::write(checklists_path(&app)?, content).map_err(|error| format!("无法保存清单：{error}"))
+}
+
+#[tauri::command]
+fn load_diaries(app: AppHandle) -> Result<Vec<DiaryEntry>, String> {
+    let path = diaries_path(&app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = fs::read_to_string(path).map_err(|error| format!("无法读取日记：{error}"))?;
+    let diaries: Vec<DiaryEntry> =
+        serde_json::from_str(&content).map_err(|error| format!("日记格式无效：{error}"))?;
+    validate_diaries(&diaries)?;
+    Ok(diaries)
+}
+
+#[tauri::command]
+fn save_diaries(app: AppHandle, mut diaries: Vec<DiaryEntry>) -> Result<(), String> {
+    for entry in &mut diaries {
+        entry.title = entry.title.trim().to_string();
+        entry.content = entry.content.trim().to_string();
+    }
+    validate_diaries(&diaries)?;
+    let content =
+        serde_json::to_string_pretty(&diaries).map_err(|error| format!("无法整理日记：{error}"))?;
+    fs::write(diaries_path(&app)?, content).map_err(|error| format!("无法保存日记：{error}"))
+}
+
+#[tauri::command]
 fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
     let path = settings_path(&app)?;
     if !path.exists() {
@@ -757,6 +1016,7 @@ fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
     let content = fs::read_to_string(path).map_err(|error| format!("无法读取设置：{error}"))?;
     let mut settings: AppSettings =
         serde_json::from_str(&content).map_err(|error| format!("设置格式无效：{error}"))?;
+    normalize_workspace_preferences(&mut settings);
     settings.launch_on_startup = is_launch_on_startup_enabled()?;
     if settings.launch_on_startup {
         set_launch_on_startup(true)?;
@@ -816,6 +1076,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             load_apps,
             save_apps,
+            load_checklists,
+            save_checklists,
+            load_diaries,
+            save_diaries,
             load_settings,
             save_settings,
             get_app_icon,
@@ -839,6 +1103,31 @@ mod tests {
             kind: ShortcutKind::Local,
             sleeping: false,
             wake_days: None,
+        }
+    }
+
+    fn checklist(id: &str, name: &str, content: &str) -> Checklist {
+        Checklist {
+            id: id.into(),
+            name: name.into(),
+            daily_reset: true,
+            last_reset_date: Some("2026-08-29".into()),
+            tasks: vec![ChecklistTask {
+                id: format!("{id}-task"),
+                content: content.into(),
+                completed: false,
+                important: false,
+            }],
+        }
+    }
+
+    fn diary(id: &str, title: &str, content: &str) -> DiaryEntry {
+        DiaryEntry {
+            id: id.into(),
+            title: title.into(),
+            content: content.into(),
+            created_at: "2026-08-30T01:02:03.000Z".into(),
+            updated_at: "2026-08-30T02:03:04.000Z".into(),
         }
     }
 
@@ -916,6 +1205,41 @@ mod tests {
     }
 
     #[test]
+    fn validates_checklist_names_tasks_and_ids() {
+        let valid = checklist("today", "今日", "整理桌面");
+        assert!(validate_checklists(&[valid]).is_ok());
+
+        let duplicate = vec![
+            checklist("same", "清单一", "任务一"),
+            checklist("same", "清单二", "任务二"),
+        ];
+        assert!(validate_checklists(&duplicate).is_err());
+
+        let mut empty_task = checklist("empty", "清单", "任务");
+        empty_task.tasks[0].content = "  ".into();
+        assert!(validate_checklists(&[empty_task]).is_err());
+    }
+
+    #[test]
+    fn defaults_legacy_tasks_to_not_important() {
+        let task: ChecklistTask =
+            serde_json::from_str(r#"{"id":"legacy","content":"旧任务","completed":false}"#)
+                .unwrap();
+        assert!(!task.important);
+    }
+
+    #[test]
+    fn validates_diaries_and_utc_timestamps() {
+        assert!(validate_diaries(&[diary("one", "此刻", "安静地写下一页。")]).is_ok());
+        assert!(is_valid_utc_timestamp("2026-08-30T01:02:03.004Z"));
+        assert!(!is_valid_utc_timestamp("2026-08-30 01:02:03"));
+
+        let mut invalid = diary("bad", " ", "内容");
+        invalid.updated_at = "2026-08-29T01:02:03.000Z".into();
+        assert!(validate_diaries(&[invalid]).is_err());
+    }
+
+    #[test]
     fn validates_anniversary_names() {
         let mut settings = AppSettings::default();
         settings.anniversary_name = "Birth".into();
@@ -945,6 +1269,31 @@ mod tests {
         assert_eq!(settings.theme, ThemePreference::System);
         assert!(settings.anniversary_date.is_none());
         assert_eq!(settings.anniversary_name, DEFAULT_ANNIVERSARY_NAME);
+        assert_eq!(settings.workspace_order, default_workspace_order());
+        assert!(settings.collapsed_modules.is_empty());
+    }
+
+    #[test]
+    fn validates_workspace_module_preferences() {
+        let mut settings = AppSettings::default();
+        settings.workspace_order = vec!["diaries".into(), "checklists".into(), "shortcuts".into()];
+        settings.collapsed_modules = vec!["shortcuts".into()];
+        assert!(validate_settings(&settings).is_ok());
+
+        settings.workspace_order = vec!["shortcuts".into(), "shortcuts".into()];
+        assert!(validate_settings(&settings).is_err());
+    }
+
+    #[test]
+    fn normalizes_legacy_workspace_module_preferences() {
+        let mut settings = AppSettings::default();
+        settings.workspace_order = vec!["checklists".into(), "shortcuts".into()];
+        normalize_workspace_preferences(&mut settings);
+        assert_eq!(
+            settings.workspace_order,
+            vec!["checklists", "shortcuts", "diaries"]
+        );
+        assert!(validate_settings(&settings).is_ok());
     }
 
     #[test]
