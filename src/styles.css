@@ -1318,6 +1318,11 @@ body.is-reordering * {
   color: var(--danger);
 }
 
+.checklist-remove-button.is-confirming {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .checklist-task-empty {
   margin: 52px 8px 0;
   color: var(--faint);
@@ -1773,6 +1778,38 @@ body.is-reordering * {
   transform: rotate(-2deg) translateY(-1px);
 }
 
+.plant-blooms {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.plant-pollen {
+  fill: currentColor;
+  stroke: none;
+  pointer-events: none;
+}
+
+.plant-pollen circle {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.plant-pollen-1 { --pollen-drift: -2px; }
+.plant-pollen-2 { --pollen-drift: 1px; }
+.plant-pollen-3 { --pollen-drift: 2px; }
+
+.anniversary-plant.is-blooming .plant-blooms {
+  animation: plant-bloom 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.anniversary-plant.is-blooming .plant-pollen circle {
+  animation: plant-pollen-rise 720ms ease-out forwards;
+}
+
+.anniversary-plant.is-blooming .plant-pollen-2 { animation-delay: 90ms; }
+.anniversary-plant.is-blooming .plant-pollen-3 { animation-delay: 160ms; }
+
 .plant-line-1 { animation-delay: 1550ms; }
 .plant-line-2 { animation-delay: 2050ms; }
 .plant-line-3 { animation-delay: 2700ms; }
@@ -1823,7 +1860,13 @@ body.is-reordering * {
   font-size: 12.5px;
 }
 
-.handwritten-name.is-message:not(.is-entering) {
+.handwritten-name.is-pending {
+  animation: none;
+  fill-opacity: 0;
+  stroke-dashoffset: 360;
+}
+
+.handwritten-name.is-message:not(.is-entering):not(.is-opening) {
   animation: none;
   fill-opacity: 0.88;
   stroke-dashoffset: 0;
@@ -1835,6 +1878,12 @@ body.is-reordering * {
 
 .name-flourish {
   animation-delay: 4500ms;
+}
+
+.name-flourish.is-pending {
+  opacity: 0;
+  animation: none;
+  stroke-dashoffset: 1;
 }
 
 .name-flourish.is-leaving {
@@ -1849,6 +1898,25 @@ body.is-reordering * {
 
 @keyframes draw-line {
   to { stroke-dashoffset: 0; }
+}
+
+@keyframes plant-bloom {
+  0%, 100% { transform: translateY(0) scale(1); }
+  32% { transform: translateY(-1px) scale(1.09); }
+  58% { transform: translateY(0.3px) scale(0.985); }
+  78% { transform: translateY(-0.2px) scale(1.025); }
+}
+
+@keyframes plant-pollen-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 1px) scale(0.45);
+  }
+  34% { opacity: 0.72; }
+  100% {
+    opacity: 0;
+    transform: translate(var(--pollen-drift), -5px) scale(0.8);
+  }
 }
 
 @keyframes write-name {
@@ -3191,6 +3259,11 @@ body.is-reordering * {
   .handwritten-name {
     animation: none !important;
     stroke-dashoffset: 0;
+  }
+
+  .anniversary-plant.is-blooming .plant-blooms,
+  .anniversary-plant.is-blooming .plant-pollen circle {
+    animation: none !important;
   }
 
   .handwritten-name {

@@ -300,7 +300,8 @@ let welcomeOpen = false;
 let availableUpdate: Update | null = null;
 let updateCheckStarted = false;
 let scheduledShortcutId = "";
-let footerMessageShown = false;
+let footerSignatureTimer: number | undefined;
+let plantBloomTimer: number | undefined;
 let editingChecklistId: string | null = null;
 let diaryReaderReturnTarget: HTMLElement | null = null;
 let diaryReaderCloseTimer: number | undefined;
@@ -1473,7 +1474,15 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
     removeList.className = "checklist-remove-button";
     removeList.setAttribute("aria-label", `移除清单「${checklist.name}」`);
     removeList.append(icon("trash"), document.createTextNode("移除清单"));
-    removeList.addEventListener("click", () => void removeChecklist(checklist.id));
+    removeList.addEventListener("click", () => {
+      if (!removeList.classList.contains("is-confirming")) {
+        removeList.classList.add("is-confirming");
+        removeList.replaceChildren(icon("trash"), document.createTextNode("确认移除"));
+        removeList.setAttribute("aria-label", `再次点击，确认移除清单「${checklist.name}」`);
+        return;
+      }
+      void removeChecklist(checklist.id);
+    });
     footer.append(dailyReset, removeList);
     card.append(composer, footer);
   }
@@ -2633,7 +2642,8 @@ async function saveAnniversary(): Promise<void> {
   try {
     await invoke("save_settings", { settings });
     setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
-    if (footerMessageShown) placeFooterMessage(anniversaryMessage(), false);
+    const message = anniversaryMessage();
+    if (message) transitionFooterMessage(message);
     scheduleGreetingUpdate();
     showToast(`${anniversaryName} 的第一天已经记下`);
   } catch (error) {
@@ -2643,38 +2653,76 @@ async function saveAnniversary(): Promise<void> {
   }
 }
 
-function anniversaryMessage(): string {
+function anniversaryMessage(): string | null {
   const days = anniversaryDayCount();
   return settings.anniversaryDate && days !== null
     ? `${settings.anniversaryName} Days: ${days}天`
-    : "Self-Days";
+    : null;
 }
 
 function placeFooterMessage(message: string, animate: boolean): void {
   footerName.textContent = message;
   footerName.setAttribute("x", "85");
   footerName.setAttribute("text-anchor", "middle");
-  footerName.classList.remove("is-leaving");
+  footerName.classList.remove("is-leaving", "is-opening", "is-pending");
   footerName.classList.add("is-message");
   footerName.classList.toggle("is-entering", animate);
-  footerName.classList.toggle("is-anniversary-message", message !== "Self-Days");
+  footerName.classList.add("is-anniversary-message");
   footerName.classList.toggle("is-compact-message", [...message].length > 18);
-  footerNameFlourish.classList.remove("is-leaving");
+  footerNameFlourish.classList.remove("is-leaving", "is-pending");
   footerNameFlourish.classList.add("is-hidden");
   footerDrawing.setAttribute("aria-label", `一本打开的书、一株新芽和手写字样 ${message}`);
 }
 
-function revealAnniversaryMessage(): void {
-  if (footerMessageShown) return;
-  footerMessageShown = true;
+function initializeFooterSignature(): void {
+  const message = anniversaryMessage();
+  if (!message) {
+    footerName.textContent = "JuvenileScholar";
+    footerName.classList.remove(
+      "is-message",
+      "is-anniversary-message",
+      "is-compact-message",
+      "is-entering",
+      "is-leaving",
+      "is-opening",
+      "is-pending",
+    );
+    footerNameFlourish.classList.remove("is-hidden", "is-leaving", "is-pending");
+    footerDrawing.setAttribute("aria-label", "一本打开的书、一株新芽和 JuvenileScholar 手写署名");
+    return;
+  }
+
+  footerName.textContent = message;
+  footerName.classList.remove("is-entering", "is-leaving", "is-pending");
+  footerName.classList.add("is-message", "is-anniversary-message", "is-opening");
+  footerName.classList.toggle("is-compact-message", [...message].length > 18);
+  footerNameFlourish.classList.remove("is-leaving", "is-pending");
+  footerNameFlourish.classList.add("is-hidden");
+  footerDrawing.setAttribute("aria-label", `一本打开的书、一株新芽和手写字样 ${message}`);
+}
+
+function transitionFooterMessage(message: string): void {
+  window.clearTimeout(footerSignatureTimer);
+  footerName.classList.remove("is-opening", "is-entering");
   footerName.classList.add("is-leaving");
   footerNameFlourish.classList.add("is-leaving");
-  anniversaryPlant.setAttribute("aria-label", "小花的话已经出现");
 
   const swapDelay = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 720;
-  window.setTimeout(() => {
-    placeFooterMessage(anniversaryMessage(), true);
+  footerSignatureTimer = window.setTimeout(() => {
+    placeFooterMessage(message, true);
+    footerSignatureTimer = undefined;
   }, swapDelay);
+}
+
+function playPlantBloom(): void {
+  window.clearTimeout(plantBloomTimer);
+  anniversaryPlant.classList.remove("is-blooming");
+  void anniversaryPlant.offsetWidth;
+  anniversaryPlant.classList.add("is-blooming");
+  plantBloomTimer = window.setTimeout(() => {
+    anniversaryPlant.classList.remove("is-blooming");
+    plantBloomTimer = undefined;
+  }, 1_100);
 }
 
 async function initialize(): Promise<void> {
@@ -2699,6 +2747,8 @@ async function initialize(): Promise<void> {
     };
   }
   else showToast(errorMessage(settingsResult.reason), true);
+
+  initializeFooterSignature();
 
   if (checklistsResult.status === "fulfilled") checklists = checklistsResult.value;
   else showToast(errorMessage(checklistsResult.reason), true);
@@ -2866,7 +2916,7 @@ scheduleForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveSchedule();
 });
-anniversaryPlant.addEventListener("click", revealAnniversaryMessage);
+anniversaryPlant.addEventListener("click", playPlantBloom);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && welcomeOpen) completeWelcome(false);
   else if (event.key === "Escape" && settingsPanel.classList.contains("is-open")) closeSettings();
@@ -2882,6 +2932,8 @@ window.addEventListener("beforeunload", () => {
   window.clearTimeout(greetingTimer);
   window.clearTimeout(dailyQuoteTimer);
   window.clearTimeout(checklistResetTimer);
+  window.clearTimeout(footerSignatureTimer);
+  window.clearTimeout(plantBloomTimer);
   window.clearTimeout(diaryReaderCloseTimer);
   window.clearTimeout(diaryReaderSettleTimer);
 });
