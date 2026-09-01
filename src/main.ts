@@ -2722,7 +2722,7 @@ function playPlantBloom(): void {
   plantBloomTimer = window.setTimeout(() => {
     anniversaryPlant.classList.remove("is-blooming");
     plantBloomTimer = undefined;
-  }, 1_100);
+  }, 1_600);
 }
 
 async function initialize(): Promise<void> {

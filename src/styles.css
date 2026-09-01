@@ -17,6 +17,7 @@
   --accent: #cc785c;
   --accent-active: #a9583e;
   --accent-soft: #f2e3db;
+  --plant-pollen: #b96c28;
   --danger: #b5533f;
   --danger-soft: #f3e1db;
   --overlay: rgba(20, 20, 19, 0.28);
@@ -40,6 +41,7 @@
     --accent: #dc8f74;
     --accent-active: #c9785d;
     --accent-soft: #3a2a24;
+    --plant-pollen: #e1a24f;
     --danger: #e29179;
     --danger-soft: #472d26;
     --overlay: rgba(0, 0, 0, 0.52);
@@ -63,6 +65,7 @@
   --accent: #dc8f74;
   --accent-active: #c9785d;
   --accent-soft: #3a2a24;
+  --plant-pollen: #e1a24f;
   --danger: #e29179;
   --danger-soft: #472d26;
   --overlay: rgba(0, 0, 0, 0.52);
@@ -1784,8 +1787,14 @@ body.is-reordering * {
 }
 
 .plant-pollen {
-  fill: currentColor;
-  stroke: none;
+  fill: var(--plant-pollen);
+  stroke: var(--background);
+  stroke-width: 0.36;
+  stroke-opacity: 0.78;
+  paint-order: stroke fill;
+  filter:
+    drop-shadow(0 0 1.2px var(--background))
+    drop-shadow(0 0 3px var(--accent));
   pointer-events: none;
 }
 
@@ -1795,20 +1804,28 @@ body.is-reordering * {
   transform-origin: center;
 }
 
-.plant-pollen-1 { --pollen-drift: -2px; }
-.plant-pollen-2 { --pollen-drift: 1px; }
-.plant-pollen-3 { --pollen-drift: 2px; }
+.plant-pollen-1 { --pollen-drift: -4px; --pollen-rise: -9px; }
+.plant-pollen-2 { --pollen-drift: -2px; --pollen-rise: -13px; }
+.plant-pollen-3 { --pollen-drift: -1px; --pollen-rise: -15px; }
+.plant-pollen-4 { --pollen-drift: 1px; --pollen-rise: -17px; }
+.plant-pollen-5 { --pollen-drift: 2px; --pollen-rise: -14px; }
+.plant-pollen-6 { --pollen-drift: 3px; --pollen-rise: -12px; }
+.plant-pollen-7 { --pollen-drift: 5px; --pollen-rise: -9px; }
 
 .anniversary-plant.is-blooming .plant-blooms {
-  animation: plant-bloom 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: plant-bloom 1.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .anniversary-plant.is-blooming .plant-pollen circle {
-  animation: plant-pollen-rise 720ms ease-out forwards;
+  animation: plant-pollen-rise 1.08s cubic-bezier(0.22, 0.7, 0.25, 1) forwards;
 }
 
-.anniversary-plant.is-blooming .plant-pollen-2 { animation-delay: 90ms; }
-.anniversary-plant.is-blooming .plant-pollen-3 { animation-delay: 160ms; }
+.anniversary-plant.is-blooming .plant-pollen-2 { animation-delay: 45ms; }
+.anniversary-plant.is-blooming .plant-pollen-3 { animation-delay: 85ms; }
+.anniversary-plant.is-blooming .plant-pollen-4 { animation-delay: 125ms; }
+.anniversary-plant.is-blooming .plant-pollen-5 { animation-delay: 165ms; }
+.anniversary-plant.is-blooming .plant-pollen-6 { animation-delay: 205ms; }
+.anniversary-plant.is-blooming .plant-pollen-7 { animation-delay: 245ms; }
 
 .plant-line-1 { animation-delay: 1550ms; }
 .plant-line-2 { animation-delay: 2050ms; }
@@ -1901,21 +1918,38 @@ body.is-reordering * {
 }
 
 @keyframes plant-bloom {
-  0%, 100% { transform: translateY(0) scale(1); }
-  32% { transform: translateY(-1px) scale(1.09); }
-  58% { transform: translateY(0.3px) scale(0.985); }
-  78% { transform: translateY(-0.2px) scale(1.025); }
+  0%, 100% {
+    color: var(--footer-ink);
+    filter: none;
+    transform: translateY(0) scale(1);
+  }
+  30% {
+    color: var(--accent-active);
+    filter: drop-shadow(0 0 2.3px var(--accent));
+    transform: translateY(-1.2px) scale(1.13);
+  }
+  58% {
+    color: var(--accent);
+    filter: drop-shadow(0 0 1.6px var(--accent));
+    transform: translateY(0.3px) scale(0.98);
+  }
+  78% { transform: translateY(-0.25px) scale(1.035); }
 }
 
 @keyframes plant-pollen-rise {
   0% {
     opacity: 0;
-    transform: translate(0, 1px) scale(0.45);
+    transform: translate(0, 1px) scale(0.4);
   }
-  34% { opacity: 0.72; }
+  18% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1.18);
+  }
+  52% { opacity: 1; }
+  78% { opacity: 0.72; }
   100% {
     opacity: 0;
-    transform: translate(var(--pollen-drift), -5px) scale(0.8);
+    transform: translate(var(--pollen-drift), var(--pollen-rise)) scale(0.62);
   }
 }
 
