@@ -1,16 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
+import { getVersion } from "@tauri-apps/api/app";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { dailyQuote } from "./daily-quotes";
 import { holidayForDate, holidayGreeting } from "./holiday-greetings";
+import { ScratchpadEditor } from "./scratchpad";
+import { locateText, textExcerpt } from "./text-location";
 import "./styles.css";
+import "./workspace.css";
 
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet" | "pdf" | "presentation";
 type ShortcutKind = "local" | "web" | "folder";
 type ThemePreference = "system" | "light" | "dark";
-type WorkspaceModuleId = "shortcuts" | "checklists" | "diaries";
+type WorkspaceModuleId = "shortcuts" | "checklists" | "diaries" | "scratchpad";
 
 interface AppShortcut {
   id: string;
@@ -37,11 +41,13 @@ interface ChecklistTask {
   content: string;
   completed: boolean;
   important: boolean;
+  shortcutId?: string;
 }
 
 interface Checklist {
   id: string;
   name: string;
+  archived?: boolean;
   dailyReset: boolean;
   lastResetDate: string | null;
   tasks: ChecklistTask[];
@@ -55,6 +61,23 @@ interface DiaryEntry {
   updatedAt: string;
 }
 
+interface DiaryDraft {
+  entryId: string | null;
+  title: string;
+  content: string;
+  savedAt: string;
+}
+
+interface BackupSummary {
+  path: string;
+  createdAt: number;
+  shortcuts: number;
+  checklists: number;
+  diaries: number;
+  drafts: number;
+  scratchpadCharacters: number | null;
+}
+
 const DEFAULT_ANNIVERSARY_NAME = "Love";
 const MAX_ANNIVERSARY_NAME_LENGTH = 7;
 const MAX_CHECKLIST_NAME_LENGTH = 32;
@@ -63,7 +86,7 @@ const MAX_DIARY_TITLE_LENGTH = 80;
 const MAX_DIARY_CONTENT_LENGTH = 5_000;
 const DIARY_READER_CLOSE_DELAY_MS = 440;
 const DIARY_READER_SETTLE_DELAY_MS = 500;
-const WORKSPACE_MODULE_IDS: WorkspaceModuleId[] = ["shortcuts", "checklists", "diaries"];
+const WORKSPACE_MODULE_IDS: WorkspaceModuleId[] = ["shortcuts", "checklists", "diaries", "scratchpad"];
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
 const MILLISECONDS_PER_DAY = 86_400_000;
@@ -124,6 +147,9 @@ const PDF_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="
 const PRESENTATION_ICON_SVG = '<svg class="file-icon-glyph" viewBox="0 0 24 24"><path d="M5.5 4.5h13v11h-13zM12 15.5v4M9.5 19.5h5"/><path d="M9 8h3v3H9zM12 8a3 3 0 0 1 3 3h-3V8Z"/></svg>';
 
 const ICONS: Record<string, string> = {
+  search: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></svg>',
+  link: '<svg viewBox="0 0 24 24"><path d="m10 13 4-4M8.5 15l-1.4 1.4a3.9 3.9 0 0 1-5.5-5.5l4-4a3.9 3.9 0 0 1 5.5 0M15.5 9l1.4-1.4a3.9 3.9 0 0 1 5.5 5.5l-4 4a3.9 3.9 0 0 1-5.5 0" transform="translate(0 -1)"/></svg>',
+  archive: '<svg viewBox="0 0 24 24"><path d="M5 8v12h14V8M3.5 4h17v4h-17zM9 12h6"/></svg>',
   app: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M20 11.5a7.8 7.8 0 0 1-8 7.5 9.4 9.4 0 0 1-3.5-.7L4 20l1.5-3.7A7.2 7.2 0 0 1 4 12c0-4.1 3.6-7.5 8-7.5s8 3 8 7Z"/><path d="M8.5 11.8h.01M12 11.8h.01M15.5 11.8h.01"/></svg>',
   code: '<svg viewBox="0 0 24 24"><path d="m8.5 7-5 5 5 5M15.5 7l5 5-5 5M14 4l-4 16"/></svg>',
@@ -306,6 +332,39 @@ let editingChecklistId: string | null = null;
 let diaryReaderReturnTarget: HTMLElement | null = null;
 let diaryReaderCloseTimer: number | undefined;
 let diaryReaderSettleTimer: number | undefined;
+let diaryReaderReveal: (() => void) | undefined;
+let drafts: DiaryDraft[] = [];
+let draftsLoaded = false;
+let draftSaveQueue: Promise<void> = Promise.resolve();
+let draftSaveTimer: number | undefined;
+let diarySaving = false;
+let diaryDraftKey: string | null = null;
+let diaryMonth = "";
+let readingDiaryId: string | null = null;
+let readerOriginDiaryId: string | null = null;
+let diaryListScroll = 0;
+let focusedChecklistId: string | null = null;
+let checklistReturnTarget: HTMLElement | null = null;
+let linkingTask: { checklistId: string; taskId: string } | null = null;
+const collapsedCompleted = new Set<string>();
+let undoTimer: number | undefined;
+let updateCheckPending = false;
+let selectedBackup: string | null = null;
+let restoringBackup = false;
+const searchDialog = element<HTMLDialogElement>("search-dialog");
+const searchInput = element<HTMLInputElement>("search-input");
+const searchResults = element<HTMLElement>("search-results");
+const checklistFocusDialog = element<HTMLDialogElement>("checklist-focus-dialog");
+const checklistFocusContent = element<HTMLElement>("checklist-focus-content");
+const taskLinkDialog = element<HTMLDialogElement>("task-link-dialog");
+const backupDialog = element<HTMLDialogElement>("backup-dialog");
+const diaryMonthSelect = element<HTMLSelectElement>("diary-month-select");
+const scratchpadEditor = new ScratchpadEditor(
+  element<HTMLTextAreaElement>("scratchpad-input"),
+  element<HTMLElement>("scratchpad-status"),
+  element<HTMLButtonElement>("scratchpad-retry"),
+  invoke,
+);
 type ReorderLayout = "vertical" | "grid";
 type ReorderPreviewKind = "module" | "shortcut" | "checklist" | "task";
 
@@ -417,7 +476,8 @@ function beginLiveReorder(
   preview.style.width = `${bounds.width}px`;
   preview.style.height = `${bounds.height}px`;
   preview.style.transform = "translate3d(0, 0, 0) scale(1.012)";
-  document.body.append(preview);
+  // Keep the live preview above a modal's top layer when editing an expanded list.
+  (source.closest("dialog[open]") ?? document.body).append(preview);
 
   source.classList.add("is-reorder-source");
   handle.classList.add("is-dragging");
@@ -776,6 +836,105 @@ function errorMessage(error: unknown): string {
   return typeof error === "string" ? error : error instanceof Error ? error.message : "发生了未知错误。";
 }
 
+function offerUndo(message: string, restore: () => Promise<boolean>): void {
+  const notice = element<HTMLElement>("undo-notice");
+  (checklistFocusDialog.open ? checklistFocusDialog : element<HTMLElement>("app-shell")).append(notice);
+  const button = element<HTMLButtonElement>("undo-button");
+  window.clearTimeout(undoTimer);
+  element<HTMLElement>("undo-message").textContent = message;
+  notice.hidden = false;
+  button.disabled = false;
+  button.onclick = async () => {
+    window.clearTimeout(undoTimer);
+    button.disabled = true;
+    try {
+      if (await restore()) { notice.hidden = true; showToast("已恢复"); }
+      else button.disabled = false;
+    } catch (error) { button.disabled = false; showToast(errorMessage(error), true); }
+  };
+  undoTimer = window.setTimeout(() => { notice.hidden = true; button.onclick = null; }, 10_000);
+}
+
+function rememberDrafts(): void {
+  try { localStorage.setItem("serenook-drafts-v1", JSON.stringify(drafts)); }
+  catch { /* Native persistence remains available when the webview cache is full. */ }
+}
+
+function captureDiaryDraft(): void {
+  if (!draftsLoaded || !diaryDialog.open || diarySaving) return;
+  const entryId = diaryDraftKey;
+  const title = diaryTitleInput.value;
+  const content = diaryContentInput.value;
+  const original = diaries.find((entry) => entry.id === entryId);
+  const previous = drafts.find((draft) => draft.entryId === entryId);
+  const needsDraft = Boolean(title || content) && !(original?.title === title && original.content === content);
+  if (needsDraft && previous?.title === title && previous.content === content) return;
+  drafts = drafts.filter((draft) => draft.entryId !== entryId);
+  if (needsDraft) {
+    drafts.push({ entryId, title, content, savedAt: new Date().toISOString() });
+  }
+  rememberDrafts();
+  renderDraftNotice();
+}
+
+function persistDrafts(): Promise<void> {
+  window.clearTimeout(draftSaveTimer);
+  if (!draftsLoaded) return Promise.resolve();
+  const snapshot = JSON.parse(JSON.stringify(drafts)) as DiaryDraft[];
+  const pending = draftSaveQueue.catch(() => {}).then(() => invoke<void>("save_drafts", { drafts: snapshot }));
+  draftSaveQueue = pending;
+  return pending;
+}
+
+function scheduleDraftSave(): void {
+  captureDiaryDraft();
+  resetDiscardDraftButton();
+  element<HTMLElement>("diary-draft-status").textContent = "正在保留草稿…";
+  window.clearTimeout(draftSaveTimer);
+  draftSaveTimer = window.setTimeout(() => {
+    void persistDrafts().then(() => {
+      element<HTMLElement>("diary-draft-status").textContent = "草稿已保留";
+    }).catch(() => {
+      element<HTMLElement>("diary-draft-status").textContent = "草稿尚未写入文件，请稍后重试保存。";
+    });
+  }, 650);
+}
+
+async function flushDiaryDraft(): Promise<void> {
+  captureDiaryDraft();
+  await persistDrafts();
+}
+
+async function flushWorkspaceEdits(): Promise<void> {
+  await Promise.all([flushDiaryDraft(), scratchpadEditor.flush()]);
+}
+
+function renderDraftNotice(): void {
+  const button = element<HTMLButtonElement>("diary-draft-resume");
+  button.hidden = drafts.length === 0;
+  button.textContent = drafts.length > 1 ? `继续未写完的一页 · ${drafts.length}` : "继续未写完的一页";
+}
+
+async function loadDiaryDrafts(): Promise<void> {
+  drafts = await invoke<DiaryDraft[]>("load_drafts");
+  try {
+    const cached: unknown = JSON.parse(localStorage.getItem("serenook-drafts-v1") ?? "[]");
+    if (Array.isArray(cached)) for (const candidate of cached) {
+      if (!candidate || !(candidate.entryId === null || typeof candidate.entryId === "string")
+        || typeof candidate.title !== "string" || typeof candidate.content !== "string"
+        || candidate.title.length > MAX_DIARY_TITLE_LENGTH || candidate.content.length > MAX_DIARY_CONTENT_LENGTH
+        || typeof candidate.savedAt !== "string" || Number.isNaN(Date.parse(candidate.savedAt))) continue;
+      const saved = drafts.find((draft) => draft.entryId === candidate.entryId);
+      if (!saved || saved.savedAt < candidate.savedAt) {
+        drafts = [...drafts.filter((draft) => draft.entryId !== candidate.entryId), candidate];
+      }
+    }
+  } catch { /* A damaged cache must never replace the validated native drafts. */ }
+  draftsLoaded = true;
+  rememberDrafts();
+  renderDraftNotice();
+}
+
 function isWorkspaceModuleId(value: unknown): value is WorkspaceModuleId {
   return typeof value === "string" && WORKSPACE_MODULE_IDS.includes(value as WorkspaceModuleId);
 }
@@ -806,6 +965,13 @@ function workspaceModuleElements(moduleId: WorkspaceModuleId): {
   if (moduleId === "checklists") {
     return { module: checklistsModule, toggle: checklistsModuleToggle, content: checklistsModuleContent };
   }
+  if (moduleId === "scratchpad") {
+    return {
+      module: element<HTMLElement>("scratchpad-module"),
+      toggle: element<HTMLButtonElement>("scratchpad-module-toggle"),
+      content: element<HTMLElement>("scratchpad-module-content"),
+    };
+  }
   return { module: diariesModule, toggle: diariesModuleToggle, content: diariesModuleContent };
 }
 
@@ -830,6 +996,10 @@ function renderWorkspaceModules(): void {
 }
 
 async function toggleWorkspaceModule(moduleId: WorkspaceModuleId): Promise<void> {
+  if (moduleId === "scratchpad" && !settings.collapsedModules.includes(moduleId)) {
+    try { await scratchpadEditor.flush(); }
+    catch (error) { showToast(errorMessage(error), true); return; }
+  }
   const previous = settings;
   const collapsed = new Set(settings.collapsedModules);
   if (collapsed.has(moduleId)) collapsed.delete(moduleId);
@@ -838,6 +1008,9 @@ async function toggleWorkspaceModule(moduleId: WorkspaceModuleId): Promise<void>
   renderWorkspaceModules();
   try {
     await invoke("save_settings", { settings });
+    if (moduleId === "scratchpad" && !collapsed.has(moduleId)) {
+      requestAnimationFrame(() => scratchpadEditor.restoreView());
+    }
   } catch (error) {
     settings = previous;
     renderWorkspaceModules();
@@ -924,7 +1097,7 @@ function applyDailyChecklistResets(now = new Date()): boolean {
   const today = localDateKey(now);
   let changed = false;
   checklists = checklists.map((checklist) => {
-    if (!checklist.dailyReset || checklist.lastResetDate === today) return checklist;
+    if (checklist.archived || !checklist.dailyReset || checklist.lastResetDate === today) return checklist;
     changed = true;
     return {
       ...checklist,
@@ -1054,7 +1227,7 @@ async function addChecklistTask(
     : checklist);
   renderChecklists();
   if (await persistChecklistChanges(previous)) {
-    window.setTimeout(() => checklistGrid.querySelector<HTMLInputElement>(`[data-task-input="${checklistId}"]`)?.focus(), 0);
+    window.setTimeout(() => activeChecklistRoot().querySelector<HTMLInputElement>(`[data-task-input="${checklistId}"]`)?.focus(), 0);
   }
 }
 
@@ -1111,22 +1284,44 @@ async function toggleChecklistTask(checklistId: string, taskId: string): Promise
 }
 
 async function removeChecklistTask(checklistId: string, taskId: string): Promise<void> {
+  const originalList = checklists.find((list) => list.id === checklistId);
+  const index = originalList?.tasks.findIndex((task) => task.id === taskId) ?? -1;
+  const removed = originalList?.tasks[index];
+  if (!removed) return;
   const previous = checklists;
   checklists = checklists.map((checklist) => checklist.id === checklistId
     ? { ...checklist, tasks: checklist.tasks.filter((task) => task.id !== taskId) }
     : checklist);
   renderChecklists();
-  await persistChecklistChanges(previous);
+  if (await persistChecklistChanges(previous)) offerUndo("已移除任务", async () => {
+    const current = checklists.find((list) => list.id === checklistId);
+    if (!current) { showToast("所属清单已不存在，请从备份恢复。", true); return false; }
+    if (current.tasks.some((task) => task.id === taskId)) return true;
+    const before = checklists;
+    const tasks = [...current.tasks];
+    tasks.splice(Math.min(index, tasks.length), 0, removed);
+    checklists = checklists.map((list) => list.id === checklistId ? { ...list, tasks } : list);
+    renderChecklists();
+    return persistChecklistChanges(before);
+  });
 }
 
 async function removeChecklist(checklistId: string): Promise<void> {
   const removed = checklists.find((checklist) => checklist.id === checklistId);
   if (!removed) return;
+  const removedIndex = checklists.indexOf(removed);
   const previous = checklists;
   checklists = checklists.filter((checklist) => checklist.id !== checklistId);
   editingChecklistId = null;
   renderChecklists();
-  await persistChecklistChanges(previous, `已移除清单「${removed.name}」`);
+  if (await persistChecklistChanges(previous)) offerUndo(`已移除「${removed.name}」`, async () => {
+    if (checklists.some((list) => list.id === removed.id)) return true;
+    const before = checklists;
+    checklists = [...checklists];
+    checklists.splice(Math.min(removedIndex, checklists.length), 0, removed);
+    renderChecklists();
+    return persistChecklistChanges(before);
+  });
 }
 
 function clearChecklistCardDragState(): void {
@@ -1182,7 +1377,9 @@ async function finishChecklistCardDrag(event: PointerEvent): Promise<void> {
 
   const previous = checklists;
   const byId = new Map(checklists.map((checklist) => [checklist.id, checklist]));
-  checklists = nextOrder.map((id) => byId.get(id)).filter((checklist): checklist is Checklist => Boolean(checklist));
+  // Reorder only visible cards, retaining stored lists in their original slots.
+  let nextIndex = 0;
+  checklists = checklists.map((list) => list.archived ? list : byId.get(nextOrder[nextIndex++])!);
   renderChecklists();
   await persistChecklistChanges(previous);
 }
@@ -1268,8 +1465,8 @@ function cancelChecklistTaskDrag(event: PointerEvent): void {
   renderChecklists();
 }
 
-function createChecklistCard(checklist: Checklist): HTMLElement {
-  const editingChecklist = editingChecklistId === checklist.id;
+function createChecklistCard(checklist: Checklist, expanded = false): HTMLElement {
+  const editingChecklist = !checklist.archived && editingChecklistId === checklist.id;
   const card = document.createElement("article");
   card.className = "checklist-card";
   card.classList.toggle("is-editing", editingChecklist);
@@ -1277,7 +1474,7 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
 
   const header = document.createElement("header");
   header.className = "checklist-card-heading";
-  if (editingChecklist) {
+  if (editingChecklist && !expanded) {
     const dragHandle = document.createElement("span");
     dragHandle.className = "checklist-card-drag-handle reorder-handle";
     dragHandle.title = "拖动清单排序";
@@ -1305,7 +1502,13 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
     titleRow.append(titleInput);
   } else {
     const title = document.createElement("h3");
-    title.textContent = checklist.name;
+    const titleButton = document.createElement("button");
+    titleButton.type = "button";
+    titleButton.className = "checklist-title-button";
+    titleButton.textContent = checklist.name;
+    titleButton.setAttribute("aria-label", `展开清单「${checklist.name}」`);
+    titleButton.addEventListener("click", () => openChecklistFocus(checklist.id, titleButton));
+    title.append(titleButton);
     titleRow.append(title);
   }
 
@@ -1319,6 +1522,7 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
   const edit = document.createElement("button");
   edit.type = "button";
   edit.className = "checklist-edit-button";
+  edit.hidden = Boolean(checklist.archived);
   edit.append(icon("edit"));
   edit.setAttribute("aria-label", editingChecklist ? `完成编辑 ${checklist.name}` : `编辑 ${checklist.name}`);
   edit.setAttribute("aria-pressed", String(editingChecklist));
@@ -1326,7 +1530,7 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
     editingChecklistId = editingChecklist ? null : checklist.id;
     renderChecklists();
     if (!editingChecklist) {
-      window.setTimeout(() => checklistGrid.querySelector<HTMLInputElement>(`[data-task-input="${checklist.id}"]`)?.focus(), 0);
+      window.setTimeout(() => activeChecklistRoot().querySelector<HTMLInputElement>(`[data-task-input="${checklist.id}"]`)?.focus(), 0);
     }
   });
   header.append(titleRow, edit);
@@ -1335,7 +1539,7 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
   if (checklist.dailyReset && !editingChecklist) {
     const resetNote = document.createElement("span");
     resetNote.className = "checklist-reset-note";
-    resetNote.textContent = "每日重置";
+    resetNote.textContent = checklist.archived ? "已收存 · 每日重置已暂停" : "每日重置";
     card.append(resetNote);
   }
 
@@ -1354,6 +1558,7 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
       item.className = "checklist-task";
       item.classList.toggle("is-completed", task.completed);
       item.classList.toggle("is-important", task.important);
+      item.hidden = !editingChecklist && task.completed && collapsedCompleted.has(checklist.id);
       item.dataset.taskId = task.id;
 
       if (editingChecklist) {
@@ -1369,6 +1574,7 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
       const completion = document.createElement("button");
       completion.type = "button";
       completion.className = "task-completion";
+      completion.disabled = Boolean(checklist.archived);
       completion.classList.toggle("is-important", task.important);
       completion.classList.toggle("is-completed", task.completed);
       completion.setAttribute("aria-pressed", String(task.completed));
@@ -1393,7 +1599,33 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
       } else {
         content.textContent = task.content;
       }
-      item.append(completion, content);
+      item.append(completion);
+      const linked = shortcuts.find((shortcut) => shortcut.id === task.shortcutId);
+      if (editingChecklist) {
+        const editor = document.createElement("div");
+        editor.className = "task-content-editor";
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "task-link-edit text-action";
+        link.textContent = linked?.name ?? (task.shortcutId ? "入口已移除" : "关联入口");
+        link.setAttribute("aria-label", `为任务「${task.content}」关联入口`);
+        link.addEventListener("click", () => openTaskLink(checklist.id, task.id));
+        editor.append(content, link);
+        item.append(editor);
+      } else {
+        item.append(content);
+        if (linked) {
+          const link = document.createElement("button");
+          link.type = "button";
+          link.className = "task-linked-open quiet-icon-button";
+          link.append(icon("arrow"));
+          link.title = `打开 ${linked.name}`;
+          link.setAttribute("aria-label", `打开关联入口 ${linked.name}`);
+          link.addEventListener("click", () => void launch(linked));
+          item.classList.add("has-linked-shortcut");
+          item.append(link);
+        }
+      }
 
       if (editingChecklist) {
         const important = document.createElement("button");
@@ -1417,6 +1649,20 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
     taskFrame.append(list);
   }
   card.append(taskFrame);
+  const completedCount = checklist.tasks.filter((task) => task.completed).length;
+  if (completedCount && !editingChecklist) {
+    const completedToggle = document.createElement("button");
+    completedToggle.type = "button";
+    completedToggle.className = "completed-toggle text-action";
+    completedToggle.textContent = `已完成 · ${completedCount}`;
+    completedToggle.setAttribute("aria-expanded", String(!collapsedCompleted.has(checklist.id)));
+    completedToggle.addEventListener("click", () => {
+      if (collapsedCompleted.has(checklist.id)) collapsedCompleted.delete(checklist.id);
+      else collapsedCompleted.add(checklist.id);
+      renderChecklists();
+    });
+    card.append(completedToggle);
+  }
 
   if (editingChecklist) {
     const composer = document.createElement("form");
@@ -1483,11 +1729,77 @@ function createChecklistCard(checklist: Checklist): HTMLElement {
       }
       void removeChecklist(checklist.id);
     });
-    footer.append(dailyReset, removeList);
+    const archive = document.createElement("button");
+    archive.type = "button";
+    archive.className = "text-action checklist-store-button";
+    archive.textContent = "收存";
+    archive.setAttribute("aria-label", `收存清单「${checklist.name}」`);
+    archive.addEventListener("click", () => void setChecklistArchived(checklist.id, true));
+    footer.append(dailyReset, archive, removeList);
     card.append(composer, footer);
   }
 
+  if (checklist.archived) {
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "text-action checklist-restore-button";
+    restore.textContent = "恢复到工作台";
+    restore.addEventListener("click", () => void setChecklistArchived(checklist.id, false));
+    card.append(restore);
+  }
   return card;
+}
+
+async function setChecklistArchived(id: string, archived: boolean): Promise<void> {
+  const list = checklists.find((item) => item.id === id);
+  if (!list || Boolean(list.archived) === archived) return;
+  const previous = checklists;
+  checklists = checklists.map((item) => item.id === id ? {
+    ...item, archived,
+    lastResetDate: !archived && item.dailyReset ? localDateKey() : item.lastResetDate,
+  } : item);
+  if (!await persistChecklistChanges(previous)) return;
+  editingChecklistId = null;
+  if (focusedChecklistId === id) closeChecklistFocus();
+  renderChecklists();
+  showToast(archived ? `已收存「${list.name}」` : `已恢复「${list.name}」`);
+}
+
+function renderStoredChecklists(): void {
+  const stored = checklists.filter((list) => list.archived);
+  const content = element<HTMLElement>("stored-checklist-list");
+  content.replaceChildren();
+  if (!stored.length) {
+    const empty = document.createElement("p");
+    empty.className = "field-hint";
+    empty.textContent = "这里留给暂告一段落的清单。";
+    content.append(empty);
+  }
+  for (const list of stored) {
+    const row = document.createElement("div");
+    row.className = "stored-checklist-row";
+    const view = document.createElement("button");
+    view.type = "button";
+    view.className = "stored-checklist-view";
+    const title = document.createElement("span");
+    title.textContent = list.name;
+    const detail = document.createElement("small");
+    detail.textContent = `${list.tasks.length} 项任务 · ${list.tasks.filter((task) => task.completed).length} 项完成`;
+    view.append(title, detail);
+    view.setAttribute("aria-label", `查看已收存清单「${list.name}」`);
+    view.addEventListener("click", () => {
+      element<HTMLDialogElement>("stored-checklist-dialog").close();
+      openChecklistFocus(list.id, element<HTMLButtonElement>("stored-checklist-button"));
+    });
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "text-action";
+    restore.textContent = "恢复";
+    restore.setAttribute("aria-label", `恢复清单「${list.name}」`);
+    restore.addEventListener("click", () => void setChecklistArchived(list.id, false));
+    row.append(view, restore);
+    content.append(row);
+  }
 }
 
 function renderChecklists(): void {
@@ -1495,9 +1807,66 @@ function renderChecklists(): void {
   if (editingChecklistId && !checklists.some((checklist) => checklist.id === editingChecklistId)) {
     editingChecklistId = null;
   }
-  checklistGrid.replaceChildren(...checklists.map(createChecklistCard));
-  checklistGrid.hidden = checklists.length === 0;
-  checklistEmptyState.hidden = checklists.length > 0;
+  const scrollPositions = new Map<string, number>();
+  document.querySelectorAll<HTMLElement>(".checklist-card").forEach((card) => {
+    scrollPositions.set(card.dataset.checklistId!, card.querySelector(".checklist-task-frame")?.scrollTop ?? 0);
+  });
+  const active = checklists.filter((list) => !list.archived);
+  checklistGrid.replaceChildren(...active.map((list) => createChecklistCard(list)));
+  checklistGrid.hidden = active.length === 0;
+  checklistEmptyState.hidden = active.length > 0;
+  renderStoredChecklists();
+  if (focusedChecklistId) {
+    const focused = checklists.find((list) => list.id === focusedChecklistId);
+    if (focused) checklistFocusContent.replaceChildren(createChecklistCard(focused, true));
+    else closeChecklistFocus();
+  }
+  document.querySelectorAll<HTMLElement>(".checklist-card").forEach((card) => {
+    const frame = card.querySelector(".checklist-task-frame");
+    if (frame) frame.scrollTop = scrollPositions.get(card.dataset.checklistId!) ?? 0;
+  });
+}
+
+function activeChecklistRoot(): HTMLElement {
+  return checklistFocusDialog.open ? checklistFocusContent : checklistGrid;
+}
+
+function openChecklistFocus(id: string, source?: HTMLElement): void {
+  focusedChecklistId = id;
+  checklistReturnTarget = source ?? document.activeElement as HTMLElement;
+  renderChecklists();
+  if (!checklistFocusDialog.open) checklistFocusDialog.showModal();
+}
+
+function closeChecklistFocus(): void {
+  const id = focusedChecklistId;
+  focusedChecklistId = null;
+  checklistFocusDialog.close();
+  element<HTMLElement>("app-shell").append(element<HTMLElement>("undo-notice"));
+  checklistFocusContent.replaceChildren();
+  const target = checklistReturnTarget?.isConnected ? checklistReturnTarget
+    : checklistGrid.querySelector<HTMLElement>(`[data-checklist-id="${CSS.escape(id ?? "")}"] .checklist-title-button`);
+  target?.focus({ preventScroll: true });
+}
+
+function openTaskLink(checklistId: string, taskId: string): void {
+  linkingTask = { checklistId, taskId };
+  const task = checklists.find((list) => list.id === checklistId)?.tasks.find((item) => item.id === taskId);
+  const select = element<HTMLSelectElement>("task-link-select");
+  select.replaceChildren(new Option("不关联", ""), ...shortcuts.map((shortcut) => new Option(shortcut.name, shortcut.id)));
+  select.value = shortcuts.some((shortcut) => shortcut.id === task?.shortcutId) ? task!.shortcutId! : "";
+  taskLinkDialog.showModal();
+}
+
+async function saveTaskLink(): Promise<void> {
+  if (!linkingTask) return;
+  const { checklistId, taskId } = linkingTask;
+  const shortcutId = element<HTMLSelectElement>("task-link-select").value || undefined;
+  const previous = checklists;
+  checklists = checklists.map((list) => list.id === checklistId ? { ...list,
+    tasks: list.tasks.map((task) => task.id === taskId ? { ...task, shortcutId } : task),
+  } : list);
+  if (await persistChecklistChanges(previous)) { taskLinkDialog.close(); renderChecklists(); }
 }
 
 function formatDiaryTimestamp(value: string): string {
@@ -1532,9 +1901,14 @@ function openDiaryDialog(entry?: DiaryEntry): void {
   diaryForm.reset();
   diaryFormError.hidden = true;
   diaryIdInput.value = entry?.id ?? "";
+  diaryDraftKey = entry?.id ?? null;
   resetDiaryDeleteConfirmation();
   diaryTitleInput.value = entry?.title ?? "";
   diaryContentInput.value = entry?.content ?? "";
+  const draft = drafts.find((candidate) => candidate.entryId === (entry?.id ?? null));
+  if (draft) { diaryTitleInput.value = draft.title; diaryContentInput.value = draft.content; }
+  element<HTMLElement>("diary-draft-status").textContent = draft ? "已接续上次的草稿" : "输入后自动保留草稿";
+  resetDiscardDraftButton();
   diaryDialogTitle.textContent = entry ? "修改这一页" : "记录此刻";
   diaryDeleteButton.hidden = !entry;
   diarySaveButton.textContent = entry ? "保存修改" : "保存";
@@ -1550,10 +1924,15 @@ function openDiaryDialog(entry?: DiaryEntry): void {
   window.setTimeout(() => diaryTitleInput.focus(), 0);
 }
 
-function closeDiaryDialog(): void {
+function closeDiaryDialog(preserveDraft = true): void {
+  if (diarySaving) return;
+  if (preserveDraft) {
+    captureDiaryDraft();
+    void persistDrafts().catch((error) => showToast(errorMessage(error), true));
+  }
   resetDiaryDeleteConfirmation();
   diaryDialog.close();
-  addDiaryButton.focus();
+  addDiaryButton.focus({ preventScroll: true });
 }
 
 function resetDiaryDeleteConfirmation(): void {
@@ -1561,6 +1940,25 @@ function resetDiaryDeleteConfirmation(): void {
   diaryDeleteButton.textContent = "移除";
   const entry = diaries.find((candidate) => candidate.id === diaryIdInput.value);
   diaryDeleteButton.setAttribute("aria-label", entry ? `移除日记「${entry.title}」` : "移除日记");
+}
+
+function resetDiscardDraftButton(): void {
+  const button = element<HTMLButtonElement>("diary-discard-draft");
+  button.textContent = "放弃草稿";
+  button.classList.remove("is-confirming");
+  button.hidden = !drafts.some((draft) => draft.entryId === diaryDraftKey);
+}
+
+async function discardDiaryDraft(): Promise<void> {
+  if (diarySaving) return;
+  const button = element<HTMLButtonElement>("diary-discard-draft");
+  if (!button.classList.contains("is-confirming")) {
+    button.textContent = "确认放弃"; button.classList.add("is-confirming"); return;
+  }
+  drafts = drafts.filter((draft) => draft.entryId !== diaryDraftKey);
+  rememberDrafts(); renderDraftNotice();
+  try { await persistDrafts(); closeDiaryDialog(false); }
+  catch (error) { showToast(errorMessage(error), true); }
 }
 
 function finishClosingDiaryReader(): void {
@@ -1575,10 +1973,16 @@ function finishClosingDiaryReader(): void {
   diaryReaderDialog.style.removeProperty("--reader-scale");
   const returnTarget = diaryReaderReturnTarget;
   diaryReaderReturnTarget = null;
-  if (returnTarget?.isConnected) returnTarget.focus();
+  const target = returnTarget?.isConnected ? returnTarget
+    : diaryGrid.querySelector<HTMLElement>(`[data-diary-id="${CSS.escape(readerOriginDiaryId ?? "")}"]`);
+  target?.focus({ preventScroll: true });
+  mainView.scrollTop = diaryListScroll;
+  readingDiaryId = null;
+  readerOriginDiaryId = null;
 }
 
 function closeDiaryReader(): void {
+  diaryReaderReveal = undefined;
   if (!diaryReaderDialog.open || diaryReaderDialog.classList.contains("is-closing")) return;
   window.clearTimeout(diaryReaderSettleTimer);
   diaryReaderSettleTimer = undefined;
@@ -1593,7 +1997,10 @@ function closeDiaryReader(): void {
   diaryReaderCloseTimer = window.setTimeout(finishClosingDiaryReader, DIARY_READER_CLOSE_DELAY_MS);
 }
 
-function openDiaryReader(entry: DiaryEntry, sourceCard: HTMLElement): void {
+function openDiaryReader(entry: DiaryEntry, sourceCard: HTMLElement, searchTerms: string[] = []): void {
+  diaryListScroll = mainView.scrollTop;
+  readerOriginDiaryId = entry.id;
+  readingDiaryId = entry.id;
   window.clearTimeout(diaryReaderCloseTimer);
   window.clearTimeout(diaryReaderSettleTimer);
   diaryReaderCloseTimer = undefined;
@@ -1605,8 +2012,26 @@ function openDiaryReader(entry: DiaryEntry, sourceCard: HTMLElement): void {
     diaryTimeElement("修改", entry.updatedAt),
   );
   diaryReaderContent.textContent = entry.content;
+  updateDiaryReaderNavigation();
   diaryReaderDialog.classList.remove("is-open", "is-closing", "is-settled");
   diaryReaderDialog.showModal();
+  diaryReaderDialog.querySelector<HTMLElement>(".diary-reader-sheet")!.scrollTop = 0;
+  const revealMatch = () => {
+    if (!searchTerms.length || readingDiaryId !== entry.id || !diaryReaderDialog.open
+      || diaryReaderDialog.classList.contains("is-closing")) return;
+    const bodyMatch = locateText(entry.content, searchTerms);
+    const target = bodyMatch ? diaryReaderContent : diaryReaderTitle;
+    const text = bodyMatch ? entry.content : entry.title;
+    const match = bodyMatch ?? locateText(text, searchTerms);
+    if (!match) return;
+    const mark = document.createElement("mark");
+    mark.className = "matched-text";
+    mark.textContent = text.slice(match.start, match.end);
+    target.replaceChildren(document.createTextNode(text.slice(0, match.start)), mark, document.createTextNode(text.slice(match.end)));
+    const sheet = diaryReaderDialog.querySelector<HTMLElement>(".diary-reader-sheet")!;
+    sheet.scrollTop += mark.getBoundingClientRect().top - sheet.getBoundingClientRect().top - sheet.clientHeight / 2;
+  };
+  diaryReaderReveal = revealMatch;
 
   const sourceRect = sourceCard.getBoundingClientRect();
   const readerRect = diaryReaderDialog.getBoundingClientRect();
@@ -1621,6 +2046,7 @@ function openDiaryReader(entry: DiaryEntry, sourceCard: HTMLElement): void {
 
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     diaryReaderDialog.classList.add("is-open", "is-settled");
+    settleDiaryReader();
     return;
   }
 
@@ -1642,10 +2068,14 @@ function settleDiaryReader(): void {
     && !diaryReaderDialog.classList.contains("is-closing")
   ) {
     diaryReaderDialog.classList.add("is-settled");
+    const reveal = diaryReaderReveal;
+    diaryReaderReveal = undefined;
+    reveal?.();
   }
 }
 
 async function removeDiaryFromForm(): Promise<void> {
+  if (diarySaving) return;
   const existing = diaries.find((entry) => entry.id === diaryIdInput.value);
   if (!existing) return;
   if (!diaryDeleteButton.classList.contains("is-confirming")) {
@@ -1657,17 +2087,33 @@ async function removeDiaryFromForm(): Promise<void> {
   }
 
   const previous = diaries;
+  const removedIndex = diaries.indexOf(existing);
   diaries = diaries.filter((entry) => entry.id !== existing.id);
   renderDiaries();
   if (await persistDiaryChanges(previous)) {
-    closeDiaryDialog();
-    showToast(`已移除「${existing.title}」`);
+    closeDiaryDialog(false);
+    const removedDraft = drafts.find((draft) => draft.entryId === existing.id);
+    drafts = drafts.filter((draft) => draft.entryId !== existing.id);
+    rememberDrafts();
+    renderDraftNotice();
+    void persistDrafts().catch((error) => showToast(errorMessage(error), true));
+    offerUndo(`已移除「${existing.title}」`, async () => {
+      if (diaries.some((entry) => entry.id === existing.id)) return true;
+      const before = diaries;
+      diaries = [...diaries];
+      diaries.splice(Math.min(removedIndex, diaries.length), 0, existing);
+      renderDiaries();
+      if (!await persistDiaryChanges(before)) return false;
+      if (removedDraft) { drafts.push(removedDraft); rememberDrafts(); renderDraftNotice(); await persistDrafts(); }
+      return true;
+    });
   } else {
     resetDiaryDeleteConfirmation();
   }
 }
 
 async function saveDiaryFromForm(): Promise<void> {
+  if (diarySaving) return;
   const title = diaryTitleInput.value.trim();
   const content = diaryContentInput.value.trim();
   if (!title || !content) {
@@ -1688,6 +2134,11 @@ async function saveDiaryFromForm(): Promise<void> {
   }
 
   const previous = diaries;
+  captureDiaryDraft();
+  diarySaving = true;
+  diarySaveButton.disabled = true;
+  diaryTitleInput.readOnly = true;
+  diaryContentInput.readOnly = true;
   const now = new Date().toISOString();
   if (existing) {
     diaries = diaries.map((entry) => entry.id === existing.id
@@ -1696,16 +2147,27 @@ async function saveDiaryFromForm(): Promise<void> {
   } else {
     diaries = [{ id: crypto.randomUUID(), title, content, createdAt: now, updatedAt: now }, ...diaries];
   }
+  if (!existing) diaryMonth = localDateKey(new Date(now)).slice(0, 7);
   renderDiaries();
   if (await persistDiaryChanges(previous)) {
-    closeDiaryDialog();
+    drafts = drafts.filter((draft) => draft.entryId !== diaryDraftKey);
+    rememberDrafts();
+    renderDraftNotice();
+    await persistDrafts().catch((error) => showToast(errorMessage(error), true));
+    diarySaving = false;
+    closeDiaryDialog(false);
     showToast(existing ? `已修改「${title}」` : `已记录「${title}」`);
   }
+  diarySaving = false;
+  diarySaveButton.disabled = false;
+  diaryTitleInput.readOnly = false;
+  diaryContentInput.readOnly = false;
 }
 
 function createDiaryCard(entry: DiaryEntry): HTMLElement {
   const card = document.createElement("article");
   card.className = "diary-card";
+  card.dataset.diaryId = entry.id;
   card.tabIndex = 0;
   card.setAttribute("role", "button");
   card.setAttribute("aria-label", `浏览日记「${entry.title}」`);
@@ -1746,9 +2208,54 @@ function createDiaryCard(entry: DiaryEntry): HTMLElement {
 }
 
 function renderDiaries(): void {
-  diaryGrid.replaceChildren(...diaries.map(createDiaryCard));
+  const months = diaryMonths();
+  if (!months.includes(diaryMonth)) diaryMonth = months[0] ?? "";
+  diaryMonthSelect.replaceChildren(...months.map((month) => new Option(`${month.slice(0, 4)} 年 ${Number(month.slice(5))} 月`, month)));
+  diaryMonthSelect.value = diaryMonth;
+  element<HTMLElement>("diary-month-navigation").hidden = months.length === 0;
+  element<HTMLButtonElement>("diary-month-previous").disabled = months.indexOf(diaryMonth) >= months.length - 1;
+  element<HTMLButtonElement>("diary-month-next").disabled = months.indexOf(diaryMonth) <= 0;
+  diaryGrid.replaceChildren(...orderedDiaries().filter((entry) => diaryMonthKey(entry) === diaryMonth).map(createDiaryCard));
   diaryGrid.hidden = diaries.length === 0;
   diaryEmptyState.hidden = diaries.length > 0;
+}
+
+function diaryMonthKey(entry: DiaryEntry): string { return localDateKey(new Date(entry.createdAt)).slice(0, 7); }
+function diaryMonths(): string[] { return [...new Set(diaries.map(diaryMonthKey))].sort().reverse(); }
+function orderedDiaries(): DiaryEntry[] { return [...diaries].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)); }
+
+function changeDiaryMonth(direction: number): void {
+  const months = diaryMonths();
+  diaryMonth = months[months.indexOf(diaryMonth) + direction] ?? diaryMonth;
+  renderDiaries();
+}
+
+function updateDiaryReaderNavigation(): void {
+  const index = orderedDiaries().findIndex((entry) => entry.id === readingDiaryId);
+  element<HTMLButtonElement>("diary-reader-previous").disabled = index <= 0;
+  element<HTMLButtonElement>("diary-reader-next").disabled = index < 0 || index >= diaries.length - 1;
+}
+
+function turnDiaryPage(direction: number): void {
+  const entries = orderedDiaries();
+  const entry = entries[entries.findIndex((candidate) => candidate.id === readingDiaryId) + direction];
+  if (!entry) return;
+  readingDiaryId = entry.id;
+  diaryReaderTitle.textContent = entry.title;
+  diaryReaderContent.textContent = entry.content;
+  diaryReaderTimes.replaceChildren(diaryTimeElement("创建", entry.createdAt), diaryTimeElement("修改", entry.updatedAt));
+  diaryReaderDialog.querySelector(".diary-reader-sheet")!.scrollTop = 0;
+  updateDiaryReaderNavigation();
+}
+
+async function exportCurrentDiary(): Promise<void> {
+  const entry = diaries.find((candidate) => candidate.id === readingDiaryId);
+  if (!entry) return;
+  try {
+    const path = await save({ defaultPath: `${entry.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 60)}.md`,
+      filters: [{ name: "Markdown", extensions: ["md"] }, { name: "纯文本", extensions: ["txt"] }] });
+    if (path) { await invoke("export_diary", { id: entry.id, path }); showToast("这一页已导出"); }
+  } catch (error) { showToast(errorMessage(error), true); }
 }
 
 function clearShortcutCardDragState(): void {
@@ -2257,7 +2764,15 @@ async function removeCurrent(): Promise<void> {
     await persist();
     closeEditor();
     render();
-    showToast(`已移除 ${removed.name}`);
+    renderChecklists();
+    offerUndo(`已移除 ${removed.name}`, async () => {
+      if (shortcuts.some((shortcut) => shortcut.id === removed.id)) return true;
+      const before = shortcuts;
+      shortcuts = [...shortcuts];
+      shortcuts.splice(Math.min(index, shortcuts.length), 0, removed);
+      try { await persist(); render(); renderChecklists(); return true; }
+      catch (error) { shortcuts = before; showToast(errorMessage(error), true); return false; }
+    });
   } catch (error) {
     shortcuts = previous;
     formError.textContent = errorMessage(error);
@@ -2517,21 +3032,183 @@ async function openWelcomeOnce(): Promise<void> {
   }, 30);
 }
 
-async function checkForUpdates(): Promise<void> {
-  if (updateCheckStarted) return;
+async function checkForUpdates(manual = false): Promise<void> {
+  if (updateCheckPending || (!manual && updateCheckStarted)) return;
   updateCheckStarted = true;
+  if (manual && availableUpdate) { showAvailableUpdate(); return; }
+  updateCheckPending = true;
+  const button = element<HTMLButtonElement>("check-update-button");
+  const status = element<HTMLElement>("settings-update-status");
+  button.disabled = true;
+  if (manual) status.textContent = "正在检查…";
   try {
     const update = await check({ timeout: 12_000 });
-    if (!update) return;
+    if (!update) { if (manual) status.textContent = "已是最新版本"; return; }
     availableUpdate = update;
-    updateVersion.textContent = `Serenook ${update.version}`;
-    renderUpdateNotes(update.body?.trim() || "这一版带来了一些安静而细小的改进。");
-    updateStatus.textContent = "准备好后，即可更新。";
-    updateInstallButton.disabled = false;
-    updateLaterButton.disabled = false;
-    updateDialog.showModal();
+    settingsButton.classList.add("has-update");
+    settingsButton.setAttribute("aria-label", "打开设置，有新版本可用");
+    button.textContent = "查看更新";
+    status.textContent = `Serenook ${update.version} 已可更新`;
+    if (manual) showAvailableUpdate();
   } catch (error) {
     console.info("Update check unavailable", error);
+    if (manual) status.textContent = "暂时无法连接，请稍后重试。";
+  } finally {
+    updateCheckPending = false;
+    button.disabled = false;
+  }
+}
+
+function showAvailableUpdate(): void {
+  if (!availableUpdate) return;
+  updateVersion.textContent = `Serenook ${availableUpdate.version}`;
+  renderUpdateNotes(availableUpdate.body?.trim() || "这一版带来了一些安静而细小的改进。");
+  updateStatus.textContent = "准备好后，即可更新。";
+  updateInstallButton.disabled = false;
+  updateLaterButton.disabled = false;
+  updateDialog.showModal();
+}
+
+function openSearch(): void {
+  if (searchDialog.open) { searchDialog.close(); return; }
+  if (document.querySelector("dialog[open]") || welcomeOpen) return;
+  closeSettings();
+  if (guideView.classList.contains("is-open")) closeGuide();
+  searchInput.value = "";
+  renderSearchResults();
+  searchDialog.showModal();
+  searchInput.focus();
+}
+
+function renderSearchResults(): void {
+  const query = searchInput.value.normalize("NFKC").trim().toLocaleLowerCase();
+  const terms = query.split(/\s+/).filter(Boolean);
+  searchResults.replaceChildren();
+  if (!terms.length) { element<HTMLElement>("search-status").textContent = "输入关键词，找回放在这里的内容。"; return; }
+  const matches = (text: string) => terms.every((term) => text.normalize("NFKC").toLocaleLowerCase().includes(term));
+  const results: { title: string; detail: string; kind: string; action: () => void | Promise<void> }[] = [];
+  for (const shortcut of shortcuts) if (matches(`${shortcut.name} ${shortcut.target}`)) results.push({
+    title: shortcut.name, detail: shortcut.sleeping ? "常用入口 · 睡眠中" : "常用入口", kind: "folder",
+    action: () => launch(shortcut),
+  });
+  for (const list of checklists) for (const task of list.tasks) if (matches(`${list.name} ${task.content}`)) results.push({
+    title: task.content, detail: `${list.name}${list.archived ? " · 已收存" : ""} · ${task.completed ? "已完成" : "未完成"}`, kind: "checklist",
+    action: async () => {
+      if (settings.collapsedModules.includes("checklists")) await toggleWorkspaceModule("checklists");
+      collapsedCompleted.delete(list.id);
+      editingChecklistId = null;
+      openChecklistFocus(list.id);
+      window.requestAnimationFrame(() => {
+        const row = checklistFocusContent.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(task.id)}"]`);
+        row?.scrollIntoView({ block: "center" });
+        row?.classList.add("search-highlight");
+      });
+    },
+  });
+  for (const entry of orderedDiaries()) if (matches(`${entry.title} ${entry.content}`)) {
+    results.push({ title: entry.title, detail: `${formatDiaryTimestamp(entry.createdAt).slice(0, 10)} · ${textExcerpt(entry.content, locateText(entry.content, terms))}`, kind: "book",
+      action: async () => {
+        if (settings.collapsedModules.includes("diaries")) await toggleWorkspaceModule("diaries");
+        diaryMonth = diaryMonthKey(entry);
+        renderDiaries();
+        const card = diaryGrid.querySelector<HTMLElement>(`[data-diary-id="${CSS.escape(entry.id)}"]`);
+        if (card) openDiaryReader(entry, card, terms);
+      },
+    });
+  }
+  if (scratchpadEditor.content && matches(scratchpadEditor.content)) results.push({
+    title: "随手记", detail: textExcerpt(scratchpadEditor.content, locateText(scratchpadEditor.content, terms)), kind: "document",
+    action: async () => {
+      if (settings.collapsedModules.includes("scratchpad")) await toggleWorkspaceModule("scratchpad");
+      if (settings.collapsedModules.includes("scratchpad")) return;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        element<HTMLElement>("scratchpad-input").scrollIntoView({ block: "center" });
+        scratchpadEditor.reveal(terms);
+      }));
+    },
+  });
+  element<HTMLElement>("search-status").textContent = results.length ? `${results.length} 项结果${results.length > 40 ? " · 显示前 40 项，可继续细化关键词" : ""}` : "还没有找到，试试另一个关键词。";
+  for (const result of results.slice(0, 40)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "search-result";
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    const detail = document.createElement("small");
+    title.textContent = result.title;
+    detail.textContent = result.detail;
+    copy.append(title, detail);
+    button.append(icon(result.kind), copy);
+    button.addEventListener("click", () => { searchDialog.close(); void result.action(); });
+    searchResults.append(button);
+  }
+}
+
+async function openBackupDialog(): Promise<void> {
+  selectedBackup = null;
+  element<HTMLElement>("backup-preview").hidden = true;
+  element<HTMLElement>("backup-status").textContent = "";
+  backupDialog.showModal();
+  const list = element<HTMLElement>("backup-list");
+  list.replaceChildren();
+  try {
+    const backups = await invoke<BackupSummary[]>("list_backups");
+    if (!backups.length) { list.textContent = "记录变更时会自动建立备份。"; return; }
+    for (const backup of backups) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "backup-row";
+      const date = document.createElement("span");
+      date.textContent = formatDiaryTimestamp(new Date(backup.createdAt).toISOString());
+      const count = document.createElement("small");
+      count.textContent = `${backup.shortcuts} 个入口 · ${backup.checklists} 张清单 · ${backup.diaries} 篇日记`
+        + (backup.scratchpadCharacters == null ? "" : ` · 随手记 ${backup.scratchpadCharacters} 字`);
+      button.append(date, count);
+      button.addEventListener("click", () => previewBackup(backup));
+      list.append(button);
+    }
+  } catch (error) { element<HTMLElement>("backup-status").textContent = errorMessage(error); }
+}
+
+function previewBackup(backup: BackupSummary): void {
+  selectedBackup = backup.path;
+  element<HTMLElement>("backup-preview").hidden = false;
+  element<HTMLElement>("backup-preview-copy").textContent = `${formatDiaryTimestamp(new Date(backup.createdAt).toISOString())}：${backup.shortcuts} 个入口、${backup.checklists} 张清单、${backup.diaries} 篇日记、${backup.drafts} 份草稿。`
+    + (backup.scratchpadCharacters == null ? "旧备份不含随手记，将保留当前页。" : `随手记 ${backup.scratchpadCharacters} 字，将替换当前页。`);
+  element<HTMLElement>("backup-preview").scrollIntoView({ block: "nearest" });
+}
+
+async function exportWorkspaceBackup(): Promise<void> {
+  try {
+    const path = await save({ defaultPath: `Serenook-${localDateKey()}.json`, filters: [{ name: "Serenook 备份", extensions: ["json"] }] });
+    if (!path) return;
+    await flushWorkspaceEdits();
+    await invoke("export_backup", { path });
+    element<HTMLElement>("backup-status").textContent = "备份已导出";
+  } catch (error) { element<HTMLElement>("backup-status").textContent = errorMessage(error); }
+}
+
+async function selectWorkspaceBackup(): Promise<void> {
+  try {
+    const path = await open({ multiple: false, filters: [{ name: "Serenook 备份", extensions: ["json"] }] });
+    if (typeof path === "string") previewBackup(await invoke<BackupSummary>("inspect_backup", { path }));
+  } catch (error) { selectedBackup = null; element<HTMLElement>("backup-preview").hidden = true; element<HTMLElement>("backup-status").textContent = errorMessage(error); }
+}
+
+async function restoreWorkspaceBackup(): Promise<void> {
+  if (!selectedBackup || restoringBackup) return;
+  restoringBackup = true;
+  const controls = [...backupDialog.querySelectorAll<HTMLButtonElement>("button")];
+  controls.forEach((button) => { button.disabled = true; });
+  try {
+    await flushWorkspaceEdits();
+    await invoke("restore_backup", { path: selectedBackup });
+    localStorage.removeItem("serenook-drafts-v1");
+    window.location.reload();
+  } catch (error) {
+    restoringBackup = false;
+    controls.forEach((button) => { button.disabled = false; });
+    element<HTMLElement>("backup-status").textContent = errorMessage(error);
   }
 }
 
@@ -2580,6 +3257,7 @@ async function installAvailableUpdate(): Promise<void> {
   let downloaded = 0;
   let contentLength = 0;
   try {
+    await flushWorkspaceEdits();
     await availableUpdate.downloadAndInstall((event) => {
       if (event.event === "Started") {
         contentLength = event.data.contentLength ?? 0;
@@ -2727,6 +3405,7 @@ function playPlantBloom(): void {
 
 async function initialize(): Promise<void> {
   hydrateStaticIcons();
+  void getVersion().then((version) => { element<HTMLElement>("settings-version").textContent = `Serenook ${version}`; });
   const [appsResult, settingsResult, checklistsResult, diariesResult] = await Promise.allSettled([
     invoke<AppShortcut[]>("load_apps"),
     invoke<AppSettings>("load_settings"),
@@ -2755,6 +3434,8 @@ async function initialize(): Promise<void> {
 
   if (diariesResult.status === "fulfilled") diaries = diariesResult.value;
   else showToast(errorMessage(diariesResult.reason), true);
+  await loadDiaryDrafts().catch((error) => showToast(errorMessage(error), true));
+  await scratchpadEditor.initialize();
 
   const checklistsBeforeReset = checklists;
   const checklistResetNeeded = applyDailyChecklistResets();
@@ -2766,6 +3447,7 @@ async function initialize(): Promise<void> {
   renderChecklists();
   renderDiaries();
   renderStartupSetting();
+  requestAnimationFrame(() => scratchpadEditor.restoreView());
   renderThemeSetting();
   if (checklistResetNeeded) await persistChecklistChanges(checklistsBeforeReset);
   scheduleChecklistReset();
@@ -2781,9 +3463,57 @@ editButton.addEventListener("click", () => {
   if (editing) scheduling = false;
   render();
 });
+element<HTMLButtonElement>("search-button").addEventListener("click", openSearch);
+element<HTMLButtonElement>("search-close-button").addEventListener("click", () => searchDialog.close());
+searchInput.addEventListener("input", renderSearchResults);
+searchDialog.addEventListener("keydown", (event) => {
+  if (event.isComposing) return;
+  const buttons = [...searchResults.querySelectorAll<HTMLButtonElement>("button")];
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  if (event.key === "ArrowDown") { event.preventDefault(); buttons[Math.min(index + 1, buttons.length - 1)]?.focus(); }
+  if (event.key === "ArrowUp") { event.preventDefault(); if (index <= 0) searchInput.focus(); else buttons[index - 1]?.focus(); }
+  if (event.key === "Enter" && document.activeElement === searchInput) { event.preventDefault(); buttons[0]?.click(); }
+});
+element<HTMLButtonElement>("checklist-focus-close").addEventListener("click", closeChecklistFocus);
+checklistFocusDialog.addEventListener("cancel", (event) => { event.preventDefault(); closeChecklistFocus(); });
+element<HTMLButtonElement>("task-link-close").addEventListener("click", () => taskLinkDialog.close());
+element<HTMLButtonElement>("task-link-save").addEventListener("click", () => void saveTaskLink());
+diaryTitleInput.addEventListener("input", scheduleDraftSave);
+diaryContentInput.addEventListener("input", scheduleDraftSave);
+element<HTMLButtonElement>("diary-draft-resume").addEventListener("click", () => {
+  const latest = [...drafts].sort((a, b) => b.savedAt.localeCompare(a.savedAt))[0];
+  if (!latest) return;
+  const entry = diaries.find((candidate) => candidate.id === latest.entryId);
+  openDiaryDialog(entry);
+  // A draft whose original entry was removed can be saved as a new page.
+  if (latest.entryId && !entry) {
+    diaryDraftKey = latest.entryId;
+    diaryTitleInput.value = latest.title;
+    diaryContentInput.value = latest.content;
+    resetDiscardDraftButton();
+  }
+});
+diaryMonthSelect.addEventListener("change", () => { diaryMonth = diaryMonthSelect.value; renderDiaries(); });
+element<HTMLButtonElement>("diary-month-previous").addEventListener("click", () => changeDiaryMonth(1));
+element<HTMLButtonElement>("diary-month-next").addEventListener("click", () => changeDiaryMonth(-1));
+element<HTMLButtonElement>("diary-reader-previous").addEventListener("click", () => turnDiaryPage(-1));
+element<HTMLButtonElement>("diary-reader-next").addEventListener("click", () => turnDiaryPage(1));
+element<HTMLButtonElement>("diary-export-button").addEventListener("click", () => void exportCurrentDiary());
+diaryReaderDialog.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowLeft") { event.preventDefault(); turnDiaryPage(-1); }
+  if (event.key === "ArrowRight") { event.preventDefault(); turnDiaryPage(1); }
+});
+element<HTMLButtonElement>("backup-setting-button").addEventListener("click", () => void openBackupDialog());
+element<HTMLButtonElement>("backup-close").addEventListener("click", () => { if (!restoringBackup) backupDialog.close(); });
+backupDialog.addEventListener("cancel", (event) => { if (restoringBackup) event.preventDefault(); });
+element<HTMLButtonElement>("backup-export").addEventListener("click", () => void exportWorkspaceBackup());
+element<HTMLButtonElement>("backup-import").addEventListener("click", () => void selectWorkspaceBackup());
+element<HTMLButtonElement>("backup-restore").addEventListener("click", () => void restoreWorkspaceBackup());
+element<HTMLButtonElement>("check-update-button").addEventListener("click", () => void checkForUpdates(true));
 shortcutsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("shortcuts"));
 checklistsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("checklists"));
 diariesModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("diaries"));
+element<HTMLButtonElement>("scratchpad-module-toggle").addEventListener("click", () => void toggleWorkspaceModule("scratchpad"));
 document.querySelectorAll<HTMLButtonElement>(".module-drag-handle").forEach((handle) => {
   handle.addEventListener("pointerdown", beginModuleDrag);
 });
@@ -2860,6 +3590,11 @@ anniversaryForm.addEventListener("submit", (event) => {
 });
 element<HTMLButtonElement>("empty-add-button").addEventListener("click", () => openEditor());
 addChecklistButton.addEventListener("click", openChecklistDialog);
+element<HTMLButtonElement>("stored-checklist-button").addEventListener("click", () => {
+  renderStoredChecklists();
+  element<HTMLDialogElement>("stored-checklist-dialog").showModal();
+});
+element<HTMLButtonElement>("stored-checklist-close").addEventListener("click", () => element<HTMLDialogElement>("stored-checklist-dialog").close());
 emptyChecklistAddButton.addEventListener("click", openChecklistDialog);
 element<HTMLButtonElement>("checklist-dialog-close-button").addEventListener("click", closeChecklistDialog);
 element<HTMLButtonElement>("checklist-cancel-button").addEventListener("click", closeChecklistDialog);
@@ -2869,8 +3604,10 @@ checklistForm.addEventListener("submit", (event) => {
 });
 addDiaryButton.addEventListener("click", () => openDiaryDialog());
 emptyDiaryAddButton.addEventListener("click", () => openDiaryDialog());
-element<HTMLButtonElement>("diary-dialog-close-button").addEventListener("click", closeDiaryDialog);
-element<HTMLButtonElement>("diary-cancel-button").addEventListener("click", closeDiaryDialog);
+element<HTMLButtonElement>("diary-dialog-close-button").addEventListener("click", () => closeDiaryDialog());
+element<HTMLButtonElement>("diary-cancel-button").addEventListener("click", () => closeDiaryDialog());
+element<HTMLButtonElement>("diary-discard-draft").addEventListener("click", () => void discardDiaryDraft());
+diaryDialog.addEventListener("cancel", (event) => { event.preventDefault(); closeDiaryDialog(); });
 diaryDeleteButton.addEventListener("click", () => void removeDiaryFromForm());
 diaryTitleInput.addEventListener("input", resetDiaryDeleteConfirmation);
 diaryContentInput.addEventListener("input", resetDiaryDeleteConfirmation);
@@ -2918,6 +3655,10 @@ scheduleForm.addEventListener("submit", (event) => {
 });
 anniversaryPlant.addEventListener("click", playPlantBloom);
 document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault(); openSearch(); return;
+  }
+  if (document.querySelector("dialog[open]")) return;
   if (event.key === "Escape" && welcomeOpen) completeWelcome(false);
   else if (event.key === "Escape" && settingsPanel.classList.contains("is-open")) closeSettings();
   else if (event.key === "Escape" && guideView.classList.contains("is-open")) closeGuide();
@@ -2942,3 +3683,20 @@ element<HTMLButtonElement>("maximize-button").addEventListener("click", () => vo
 element<HTMLButtonElement>("close-button").addEventListener("click", () => void appWindow.close());
 
 void initialize();
+
+let closingWindow = false;
+void appWindow.onCloseRequested(async (event) => {
+  if (closingWindow || diarySaving || restoringBackup) {
+    event.preventDefault();
+    showToast("正在保存，请稍候。", true);
+    return;
+  }
+  closingWindow = true;
+  try {
+    await flushWorkspaceEdits();
+    // The window API waits for this handler before finishing the close.
+  } catch (error) {
+    event.preventDefault();
+    showToast(errorMessage(error), true);
+  } finally { closingWindow = false; }
+});

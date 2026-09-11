@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod storage;
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::os::windows::ffi::OsStrExt;
@@ -52,7 +54,7 @@ const MAX_DIARY_TITLE_CHARACTERS: usize = 80;
 const MAX_DIARY_CONTENT_CHARACTERS: usize = 5_000;
 const MAX_ANNIVERSARY_NAME_CHARACTERS: usize = 7;
 const DEFAULT_ANNIVERSARY_NAME: &str = "Love";
-const WORKSPACE_MODULES: [&str; 3] = ["shortcuts", "checklists", "diaries"];
+const WORKSPACE_MODULES: [&str; 4] = ["shortcuts", "checklists", "diaries", "scratchpad"];
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "exe", "lnk", "bat", "cmd", "url", "txt", "md", "rtf", "pdf", "xps", "doc", "docx", "docm",
     "odt", "wps", "csv", "xls", "xlsx", "xlsm", "ods", "et", "ppt", "pptx", "pptm", "odp", "dps",
@@ -105,6 +107,8 @@ struct ChecklistTask {
     completed: bool,
     #[serde(default)]
     important: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shortcut_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -112,6 +116,8 @@ struct ChecklistTask {
 struct Checklist {
     id: String,
     name: String,
+    #[serde(default)]
+    archived: bool,
     #[serde(default)]
     daily_reset: bool,
     #[serde(default)]
@@ -210,6 +216,7 @@ fn config_directory(app: &AppHandle) -> Result<PathBuf, String> {
         .app_config_dir()
         .map_err(|error| format!("无法确定配置目录：{error}"))?;
     fs::create_dir_all(&directory).map_err(|error| format!("无法创建配置目录：{error}"))?;
+    storage::recover_pending(&directory)?;
     Ok(directory)
 }
 
@@ -547,6 +554,13 @@ fn validate_checklists(checklists: &[Checklist]) -> Result<(), String> {
                 return Err("任务标识无效或重复。".into());
             }
             let content = task.content.trim();
+            if task
+                .shortcut_id
+                .as_deref()
+                .is_some_and(|id| id.trim().is_empty() || id.len() > 256)
+            {
+                return Err("关联入口的标识无效。".into());
+            }
             if content.is_empty() || content.chars().count() > MAX_TASK_CONTENT_CHARACTERS {
                 return Err(format!(
                     "任务内容应为 1 到 {MAX_TASK_CONTENT_CHARACTERS} 个字符。"
@@ -947,7 +961,7 @@ fn save_apps(app: AppHandle, shortcuts: Vec<AppShortcut>) -> Result<(), String> 
     validate_shortcuts(&shortcuts)?;
     let content = serde_json::to_string_pretty(&shortcuts)
         .map_err(|error| format!("无法整理应用配置：{error}"))?;
-    fs::write(shortcuts_path(&app)?, content).map_err(|error| format!("无法保存应用配置：{error}"))
+    storage::save_file(&shortcuts_path(&app)?, content.as_bytes())
 }
 
 #[tauri::command]
@@ -975,7 +989,7 @@ fn save_checklists(app: AppHandle, mut checklists: Vec<Checklist>) -> Result<(),
     validate_checklists(&checklists)?;
     let content = serde_json::to_string_pretty(&checklists)
         .map_err(|error| format!("无法整理清单：{error}"))?;
-    fs::write(checklists_path(&app)?, content).map_err(|error| format!("无法保存清单：{error}"))
+    storage::save_file(&checklists_path(&app)?, content.as_bytes())
 }
 
 #[tauri::command]
@@ -1001,7 +1015,7 @@ fn save_diaries(app: AppHandle, mut diaries: Vec<DiaryEntry>) -> Result<(), Stri
     validate_diaries(&diaries)?;
     let content =
         serde_json::to_string_pretty(&diaries).map_err(|error| format!("无法整理日记：{error}"))?;
-    fs::write(diaries_path(&app)?, content).map_err(|error| format!("无法保存日记：{error}"))
+    storage::save_file(&diaries_path(&app)?, content.as_bytes())
 }
 
 #[tauri::command]
@@ -1032,7 +1046,7 @@ fn save_settings(app: AppHandle, mut settings: AppSettings) -> Result<(), String
     set_launch_on_startup(settings.launch_on_startup)?;
     let content = serde_json::to_string_pretty(&settings)
         .map_err(|error| format!("无法整理设置：{error}"))?;
-    fs::write(settings_path(&app)?, content).map_err(|error| format!("无法保存设置：{error}"))
+    storage::save_file(&settings_path(&app)?, content.as_bytes())
 }
 
 #[tauri::command]
@@ -1082,6 +1096,15 @@ fn main() {
             save_diaries,
             load_settings,
             save_settings,
+            storage::load_drafts,
+            storage::save_drafts,
+            storage::load_scratchpad,
+            storage::save_scratchpad,
+            storage::list_backups,
+            storage::export_backup,
+            storage::inspect_backup,
+            storage::restore_backup,
+            storage::export_diary,
             get_app_icon,
             detect_running_apps,
             launch_app
@@ -1110,6 +1133,7 @@ mod tests {
         Checklist {
             id: id.into(),
             name: name.into(),
+            archived: false,
             daily_reset: true,
             last_reset_date: Some("2026-08-29".into()),
             tasks: vec![ChecklistTask {
@@ -1117,6 +1141,7 @@ mod tests {
                 content: content.into(),
                 completed: false,
                 important: false,
+                shortcut_id: None,
             }],
         }
     }
@@ -1276,7 +1301,12 @@ mod tests {
     #[test]
     fn validates_workspace_module_preferences() {
         let mut settings = AppSettings::default();
-        settings.workspace_order = vec!["diaries".into(), "checklists".into(), "shortcuts".into()];
+        settings.workspace_order = vec![
+            "diaries".into(),
+            "checklists".into(),
+            "shortcuts".into(),
+            "scratchpad".into(),
+        ];
         settings.collapsed_modules = vec!["shortcuts".into()];
         assert!(validate_settings(&settings).is_ok());
 
@@ -1291,7 +1321,7 @@ mod tests {
         normalize_workspace_preferences(&mut settings);
         assert_eq!(
             settings.workspace_order,
-            vec!["checklists", "shortcuts", "diaries"]
+            vec!["checklists", "shortcuts", "diaries", "scratchpad"]
         );
         assert!(validate_settings(&settings).is_ok());
     }

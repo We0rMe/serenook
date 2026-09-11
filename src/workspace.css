@@ -1,0 +1,168 @@
+/* Shared controls for finding, keeping and revisiting workspace content. */
+.matched-text { color: inherit; font: inherit; background: transparent; animation: matched-text-fade 3s ease-out; }
+@keyframes matched-text-fade { 0%, 65% { background: var(--accent-soft); } 100% { background: transparent; } }
+#scratchpad-input::selection { color: var(--text); background: var(--accent-soft); }
+.matched-text { color: inherit; font: inherit; background: transparent; animation: matched-text-fade 3s ease-out; }
+@keyframes matched-text-fade { 0%, 65% { background: var(--accent-soft); } 100% { background: transparent; } }
+#scratchpad-input::selection { color: var(--text); background: var(--accent-soft); }
+.scratchpad-paper { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); }
+#scratchpad-input { display: block; width: 100%; height: 300px; padding: 22px 24px 10px; border: 0; border-radius: 12px; resize: none; background: transparent; color: var(--body); font: inherit; font-size: 14px; line-height: 1.95; overflow-wrap: anywhere; scrollbar-width: thin; user-select: text; }
+#scratchpad-input::placeholder { color: var(--faint); }
+#scratchpad-input:focus-visible { outline: none; }
+.scratchpad-paper:focus-within { border-color: var(--border-strong); }
+.scratchpad-footer { min-height: 34px; display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 4px 24px 12px; color: var(--muted); font-size: 10px; }
+#scratchpad-retry[hidden] { display: none; }
+.checklist-edit-button[hidden] { display: none; }
+.checklist-workspace-heading { gap: 16px; }
+.checklist-edit-footer { flex-wrap: wrap; gap: 8px; }
+.checklist-store-button { margin-left: auto; font-size: 9px; }
+.checklist-restore-button { align-self: flex-start; margin-top: 16px; color: var(--accent-active); }
+.task-completion:disabled { cursor: default; }
+.stored-checklist-dialog { width: min(520px, calc(100% - 56px)); max-height: 78vh; overflow: auto; padding: 26px; }
+.stored-checklist-row { display: flex; align-items: center; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.stored-checklist-row:last-child { border-bottom: 0; }
+.stored-checklist-view { flex: 1; min-width: 0; padding: 5px; border: 0; border-radius: 7px; background: transparent; text-align: left; color: var(--body); cursor: pointer; }
+.stored-checklist-view:hover { background: var(--accent-soft); }
+.stored-checklist-view span { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.stored-checklist-view small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
+.quiet-icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.quiet-icon-button svg { width: 16px; height: 16px; }
+.text-action {
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.text-action:hover { color: var(--accent-active); }
+.text-action.is-confirming { color: var(--danger); }
+.quiet-icon-button:hover { color: var(--accent-active); background: var(--accent-soft); }
+.text-action:disabled, .quiet-icon-button:disabled { opacity: 0.4; cursor: default; }
+.settings-button { position: relative; }
+.settings-button.has-update::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.settings-version-row { margin-top: 24px; padding-top: 16px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); color: var(--faint); font-size: 11px; }
+.month-navigation { display: flex; align-items: center; gap: 5px; margin-right: auto; }
+.month-navigation[hidden], .diary-draft-resume[hidden], .undo-notice[hidden], .checklist-task[hidden], .backup-preview[hidden] { display: none; }
+.diary-workspace-heading { gap: 12px; flex-wrap: wrap; }
+.month-navigation select { max-width: 140px; padding: 5px 3px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+select option { color: var(--text); background: var(--surface-raised); }
+select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.diary-draft-resume { display: block; width: fit-content; margin-top: 10px; color: var(--accent-active); }
+.reader-navigation { margin-top: 32px; padding-top: 15px; display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); }
+.diary-reader-content { user-select: text; }
+.checklist-title-button {
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+.checklist-title-button:hover { color: var(--accent-active); }
+.completed-toggle { margin-top: 9px; text-align: left; color: var(--faint); font-size: 10px; }
+.completed-toggle::after { content: "⌃"; margin-left: 7px; }
+.completed-toggle[aria-expanded="false"]::after { content: "⌄"; }
+.task-content-editor { min-width: 0; }
+.task-content-editor input { width: 100%; }
+.task-link-edit { max-width: 100%; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; font-size: 9px; }
+.checklist-task.has-linked-shortcut { grid-template-columns: 19px minmax(0, 1fr) 22px; }
+.task-linked-open { width: 22px; height: 22px; padding: 3px; }
+.task-linked-open svg { width: 13px; height: 13px; }
+.checklist-focus-dialog { width: min(630px, calc(100% - 56px)); height: min(78vh, 700px); padding: 24px; overflow: hidden; }
+.checklist-focus-dialog[open], .search-dialog[open], .backup-dialog[open], .task-link-dialog[open] { animation: workspace-dialog-in 180ms ease-out; }
+.focus-close { position: absolute; right: 14px; top: 14px; z-index: 1; }
+#checklist-focus-content { height: 100%; }
+#checklist-focus-content .checklist-card { height: 100%; padding: 12px 8px 0; border: 0; background: transparent; }
+#checklist-focus-content .checklist-card-heading { padding-right: 28px; }
+#checklist-focus-content .checklist-title-row h3 { font-size: 25px; }
+#checklist-focus-content .task-content, #checklist-focus-content .task-content-input { font-size: 14px; line-height: 1.8; }
+#checklist-focus-content .checklist-task { padding-block: 11px; }
+#checklist-focus-content .task-link-edit { font-size: 11px; }
+#checklist-focus-content .checklist-title-input { font-size: 20px; height: 36px; }
+#checklist-focus-content .checklist-task-frame { margin-top: 18px; }
+.task-link-dialog { padding: 26px; }
+.task-link-dialog select { width: 100%; margin-top: 8px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 13px; }
+.search-highlight { animation: search-highlight 2s ease-out; }
+.search-dialog { width: min(590px, calc(100% - 56px)); padding: 25px; max-height: 76vh; }
+.search-dialog .dialog-heading { margin-bottom: 18px; }
+#search-input { width: 100%; height: 43px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 14px; }
+.search-results { max-height: 44vh; overflow: auto; scrollbar-width: thin; }
+.search-result {
+  width: 100%;
+  padding: 12px 10px;
+  display: grid;
+  grid-template-columns: 19px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.search-result:hover, .search-result:focus-visible { background: var(--accent-soft); outline-offset: -2px; }
+.search-result > .inline-icon { margin-top: 2px; width: 18px; height: 18px; color: var(--muted); }
+.search-result strong { display: block; color: var(--body); font-size: 13px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.search-result small { display: -webkit-box; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.65; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.undo-notice {
+  position: fixed;
+  bottom: 25px;
+  left: 50%;
+  z-index: 20;
+  max-width: calc(100% - 40px);
+  padding: 10px 17px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--body);
+  box-shadow: 0 8px 30px #00000014;
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+.undo-notice .text-action { flex: none; color: var(--accent-active); }
+.backup-dialog { width: min(550px, calc(100% - 56px)); max-height: 80vh; padding: 26px; overflow: auto; }
+.backup-actions { display: flex; gap: 12px; margin-block: 18px; }
+.backup-list { color: var(--faint); font-size: 11px; }
+.backup-row { width: 100%; padding: 12px 8px; display: grid; gap: 5px; border: 0; border-bottom: 1px solid var(--border); background: transparent; text-align: left; cursor: pointer; }
+.backup-row:hover { background: var(--accent-soft); }
+.backup-row span { color: var(--body); font-size: 12px; }
+.backup-row small { color: var(--muted); font-size: 10px; }
+.backup-preview { margin-top: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
+.backup-preview p { font-size: 12px; line-height: 1.8; }
+@keyframes workspace-dialog-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes search-highlight { from { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); } to { box-shadow: inset 2px 0 transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .search-highlight, .checklist-focus-dialog[open], .search-dialog[open], .backup-dialog[open], .task-link-dialog[open] { animation: none; }
+  .search-highlight { background: var(--accent-soft); }
+}

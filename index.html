@@ -13,6 +13,9 @@
           <button id="settings-button" class="settings-button" type="button" aria-label="打开设置" aria-expanded="false">
             <span data-icon="settings" aria-hidden="true"></span>
           </button>
+          <button id="search-button" class="settings-button" type="button" aria-label="查找工作台内容" title="查找 · Ctrl+K">
+            <span data-icon="search" aria-hidden="true"></span>
+          </button>
         </div>
 
         <span class="titlebar-kicker" data-tauri-drag-region>SERENE NOOK</span>
@@ -105,6 +108,7 @@
             <div id="checklists-module-content" class="workspace-module-content is-open" aria-hidden="false">
               <div class="workspace-module-content-inner">
                 <div class="checklist-workspace-heading">
+                  <button id="stored-checklist-button" class="text-action" type="button" aria-label="查看已收存的清单">已收存</button>
                   <button id="add-checklist-button" class="section-add-button" type="button">
                     <span data-icon="plus" aria-hidden="true"></span>
                     <span>添加清单</span>
@@ -133,17 +137,45 @@
             <div id="diaries-module-content" class="workspace-module-content is-open" aria-hidden="false">
               <div class="workspace-module-content-inner">
                 <div class="diary-workspace-heading">
+                  <div id="diary-month-navigation" class="month-navigation" hidden>
+                    <button id="diary-month-previous" class="quiet-icon-button" type="button" aria-label="上一个月"><span data-icon="back" aria-hidden="true"></span></button>
+                    <select id="diary-month-select" aria-label="浏览月份"></select>
+                    <button id="diary-month-next" class="quiet-icon-button" type="button" aria-label="下一个月"><span data-icon="arrow" aria-hidden="true"></span></button>
+                  </div>
                   <button id="add-diary-button" class="section-add-button" type="button">
                     <span data-icon="plus" aria-hidden="true"></span>
                     <span>记录此刻</span>
                   </button>
                 </div>
+                <button id="diary-draft-resume" class="text-action diary-draft-resume" type="button" hidden>继续未写完的一页</button>
                 <div id="diary-grid" class="diary-grid" aria-label="我的日记"></div>
                 <section id="diary-empty-state" class="diary-empty-state" hidden>
                   <span data-icon="book" aria-hidden="true"></span>
                   <p>还没有文字，先留下此刻。</p>
                   <button id="empty-diary-add-button" class="secondary-button" type="button">记录第一篇</button>
                 </section>
+              </div>
+            </div>
+          </section>
+          <section id="scratchpad-module" class="workspace-module" data-module-id="scratchpad" aria-labelledby="scratchpad-module-title">
+            <header class="workspace-module-heading">
+              <button class="module-drag-handle reorder-handle" type="button" data-module-id="scratchpad" aria-label="拖动随手记工作区排序" title="拖动排序">
+                <span data-icon="grip" aria-hidden="true"></span>
+              </button>
+              <button id="scratchpad-module-toggle" class="workspace-module-toggle" type="button" aria-expanded="true" aria-controls="scratchpad-module-content">
+                <strong id="scratchpad-module-title" class="workspace-module-title">随手记</strong>
+                <span class="workspace-module-chevron" data-icon="chevron" aria-hidden="true"></span>
+              </button>
+            </header>
+            <div id="scratchpad-module-content" class="workspace-module-content is-open" aria-hidden="false">
+              <div class="workspace-module-content-inner">
+                <div class="scratchpad-paper">
+                  <textarea id="scratchpad-input" aria-label="随手记，一页纯文本" aria-describedby="scratchpad-status" placeholder="先记在这里。" maxlength="50000" spellcheck="false" disabled></textarea>
+                  <div class="scratchpad-footer">
+                    <span id="scratchpad-status" role="status" aria-live="polite">正在读取…</span>
+                    <button id="scratchpad-retry" class="text-action" type="button" hidden>重试</button>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
@@ -186,6 +218,9 @@
       </main>
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="undo-notice" class="undo-notice" role="status" hidden>
+        <span id="undo-message"></span><button id="undo-button" class="text-action" type="button">撤销</button>
+      </div>
 
       <div id="welcome-backdrop" class="welcome-backdrop" hidden>
         <section id="welcome-card" class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-copy" aria-hidden="true" inert>
@@ -309,6 +344,13 @@
               </div>
             </div>
           </div>
+          <button id="backup-setting-button" class="setting-item" type="button">
+            <span class="setting-item-icon" data-icon="archive" aria-hidden="true"></span>
+            <span class="setting-item-copy"><strong>备份与恢复</strong><small>把记录妥善留在本地</small></span>
+            <span class="setting-item-chevron" data-icon="arrow" aria-hidden="true"></span>
+          </button>
+          <div class="settings-version-row"><span id="settings-version"></span><button id="check-update-button" class="text-action" type="button">检查更新</button></div>
+          <p id="settings-update-status" class="field-hint" role="status" aria-live="polite"></p>
         </div>
       </aside>
 
@@ -327,7 +369,7 @@
               <span class="guide-number">01</span>
               <div>
                 <h3>一处安静的工作台</h3>
-                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。入口、清单与日记各有一处落脚；轻点标题即可收起，拖动左侧把手可以调整顺序。</p>
+                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。轻点分区标题收起内容，拖动左侧把手调整顺序。使用左上角查找或 Ctrl+K，可以找到入口、任务、日记与随手记，并定位匹配文字。</p>
               </div>
             </article>
 
@@ -343,7 +385,7 @@
               <span class="guide-number">03</span>
               <div>
                 <h3>清单</h3>
-                <p>用铅笔进入编辑后，可写下、修改、排序或删除任务；重要任务以星光标记完成状态，也可每天重新开始。</p>
+                <p>铅笔用来编辑、排序和关联入口，星光标记重要任务。点击名称可展开清单，已完成内容可单独收起。暂告一段落时可以收存，随后从“已收存”查看或恢复；收存期间暂停每日重置。</p>
               </div>
             </article>
 
@@ -351,12 +393,20 @@
               <span class="guide-number">04</span>
               <div>
                 <h3>日记</h3>
-                <p>选择“记录此刻”，写下标题与正文。轻点卡片安静阅读，右上角铅笔可以修改或移除；时间也会被一并留下。</p>
+                <p>输入后自动保留草稿，点击保存才写入正式日记。按月份寻找旧页，轻点卡片阅读、前后翻阅或导出；铅笔用来修改与移除。</p>
               </div>
             </article>
 
             <article class="guide-block">
               <span class="guide-number">05</span>
+              <div>
+                <h3>随手记</h3>
+                <p>展开就能写，不需要标题。停笔或离开时自动保存，再次打开保留阅读与光标位置。文字随工作台一同备份，位置记忆只留在本机。</p>
+              </div>
+            </article>
+
+            <article class="guide-block">
+              <span class="guide-number">06</span>
               <div>
                 <h3>日子各有回声</h3>
                 <p>问候会随星期、时段与节日而变，右下角的日签每日更替。明暗、纪念日与随电脑启动，也都可以按习惯调整。</p>
@@ -364,11 +414,15 @@
             </article>
 
             <article class="guide-block">
-              <span class="guide-number">06</span>
+              <span class="guide-number">07</span>
               <div>
-                <h3>更新</h3>
-                <p>Serenook 会在启动后自查新版本。发现更新时，你可以先读完说明，再选择稍后处理或立即安装。</p>
+                <h3>妥善保存</h3>
+                <p>移除后可短暂撤销。设置中的“备份与恢复”支持导出和恢复记录，并保留最近 7 份本地备份。恢复前会另存当前记录。</p>
               </div>
+            </article>
+            <article class="guide-block">
+              <span class="guide-number">08</span>
+              <div><h3>更新</h3><p>启动后自动检查新版本，设置按钮上的小点会安静提醒。也可在设置底部检查更新、查看说明并选择安装。</p></div>
             </article>
           </div>
 
@@ -514,12 +568,14 @@
         <input id="diary-title-input" type="text" maxlength="80" autocomplete="off" placeholder="为此刻留一个名字" required />
         <label for="diary-content-input">内容</label>
         <textarea id="diary-content-input" maxlength="5000" rows="9" placeholder="写下正在发生的事，或此刻的心绪。" required></textarea>
+        <p id="diary-draft-status" class="field-hint" role="status" aria-live="polite"></p>
+        <button id="diary-discard-draft" class="text-action" type="button" hidden>放弃草稿</button>
         <div id="diary-dialog-times" class="diary-dialog-times" hidden></div>
         <p id="diary-form-error" class="form-error" role="alert" hidden></p>
         <div class="dialog-actions">
           <button id="diary-delete-button" class="delete-button diary-delete-button" type="button" hidden>移除</button>
           <span class="dialog-spacer"></span>
-          <button id="diary-cancel-button" class="secondary-button" type="button">取消</button>
+          <button id="diary-cancel-button" class="secondary-button" type="button">稍后继续</button>
           <button id="diary-save-button" class="primary-button" type="submit">保存</button>
         </div>
       </form>
@@ -535,6 +591,11 @@
           <div id="diary-reader-times" class="diary-reader-times"></div>
         </header>
         <div id="diary-reader-content" class="diary-reader-content"></div>
+        <nav class="reader-navigation" aria-label="日记翻阅">
+          <button id="diary-reader-previous" class="text-action" type="button">上一篇</button>
+          <button id="diary-export-button" class="text-action" type="button">导出这一页</button>
+          <button id="diary-reader-next" class="text-action" type="button">下一篇</button>
+        </nav>
       </article>
     </dialog>
 
@@ -553,6 +614,42 @@
       </section>
     </dialog>
 
+    <dialog id="search-dialog" class="shortcut-dialog search-dialog" aria-labelledby="search-title">
+      <header class="dialog-heading"><h2 id="search-title">找一找</h2><button id="search-close-button" class="dialog-close-button" type="button" aria-label="关闭查找"><span data-icon="close" aria-hidden="true"></span></button></header>
+      <input id="search-input" type="search" placeholder="入口、任务、日记或随手记" autocomplete="off" aria-label="查找内容" aria-controls="search-results" />
+      <p id="search-status" class="field-hint" role="status"></p>
+      <div id="search-results" class="search-results"></div>
+    </dialog>
+
+    <dialog id="checklist-focus-dialog" class="shortcut-dialog checklist-focus-dialog" aria-label="展开清单">
+      <button id="checklist-focus-close" class="dialog-close-button focus-close" type="button" aria-label="收起清单"><span data-icon="close" aria-hidden="true"></span></button>
+      <div id="checklist-focus-content"></div>
+    </dialog>
+
+    <dialog id="task-link-dialog" class="shortcut-dialog task-link-dialog" aria-labelledby="task-link-title">
+      <header class="dialog-heading"><h2 id="task-link-title">关联一个入口</h2><button id="task-link-close" class="dialog-close-button" type="button" aria-label="关闭关联入口"><span data-icon="close" aria-hidden="true"></span></button></header>
+      <label for="task-link-select">已有入口</label><select id="task-link-select"></select>
+      <p class="field-hint">打开入口不会改变任务的完成状态。</p>
+      <div class="dialog-actions"><span class="dialog-spacer"></span><button id="task-link-save" class="primary-button" type="button">保存</button></div>
+    </dialog>
+
+    <dialog id="backup-dialog" class="shortcut-dialog backup-dialog" aria-labelledby="backup-title">
+      <header class="dialog-heading"><h2 id="backup-title">备份与恢复</h2><button id="backup-close" class="dialog-close-button" type="button" aria-label="关闭备份与恢复"><span data-icon="close" aria-hidden="true"></span></button></header>
+      <p class="field-hint">包括入口、清单、日记、草稿、随手记与偏好。记录变化前自动备份，普通备份至少间隔一小时，保留最近 7 份。</p>
+      <div class="backup-actions"><button id="backup-export" class="secondary-button" type="button">导出备份</button><button id="backup-import" class="secondary-button" type="button">选择备份恢复</button></div>
+      <div id="backup-list" class="backup-list"></div>
+      <section id="backup-preview" class="backup-preview" hidden>
+        <p id="backup-preview-copy"></p>
+        <p class="field-hint">将替换当前记录；恢复前会另存一份当前记录。</p>
+        <button id="backup-restore" class="delete-button is-confirming" type="button">确认恢复</button>
+      </section>
+      <p id="backup-status" class="field-hint" role="status" aria-live="polite"></p>
+    </dialog>
+
+    <dialog id="stored-checklist-dialog" class="shortcut-dialog stored-checklist-dialog" aria-labelledby="stored-checklist-title">
+      <header class="dialog-heading"><h2 id="stored-checklist-title">已收存</h2><button id="stored-checklist-close" class="dialog-close-button" type="button" aria-label="关闭已收存清单"><span data-icon="close" aria-hidden="true"></span></button></header>
+      <div id="stored-checklist-list"></div>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
