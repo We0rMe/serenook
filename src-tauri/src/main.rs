@@ -1068,18 +1068,47 @@ fn get_app_icon(target: String, kind: ShortcutKind) -> Result<Option<String>, St
     Ok(extract_icon_data_url(&path).ok())
 }
 
-#[tauri::command]
-fn launch_app(target: String, kind: ShortcutKind) -> Result<(), String> {
+#[derive(Debug, Serialize)]
+struct LaunchError {
+    code: &'static str,
+    message: String,
+}
+
+impl From<String> for LaunchError {
+    fn from(message: String) -> Self { Self { code: "open_failed", message } }
+}
+
+fn local_launch_target(target: &str, kind: ShortcutKind) -> Result<PathBuf, LaunchError> {
     let path = match kind {
-        ShortcutKind::Local => validate_target(&target, true)?,
-        ShortcutKind::Folder => validate_folder_target(&target, true)?,
-        ShortcutKind::Web => return open_web_url(&target),
+        ShortcutKind::Local => validate_target(target, false)?,
+        ShortcutKind::Folder => validate_folder_target(target, false)?,
+        ShortcutKind::Web => return Err("网址无需重新定位。".to_string().into()),
     };
+    let metadata = fs::metadata(&path).map_err(|error| LaunchError {
+        code: if error.kind() == std::io::ErrorKind::NotFound { "target_missing" } else { "open_failed" },
+        message: "暂时无法访问这个位置。".into(),
+    })?;
+    if (matches!(kind, ShortcutKind::Folder) && !metadata.is_dir())
+        || (matches!(kind, ShortcutKind::Local) && !metadata.is_file()) {
+        return Err("请选择相同类型的本地目标。".to_string().into());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn validate_relocation(target: String, kind: ShortcutKind) -> Result<(), LaunchError> {
+    local_launch_target(&target, kind).map(|_| ())
+}
+
+#[tauri::command]
+fn launch_app(target: String, kind: ShortcutKind) -> Result<(), LaunchError> {
+    if matches!(kind, ShortcutKind::Web) { return open_web_url(&target).map_err(Into::into); }
+    let path = local_launch_target(&target, kind)?;
     Command::new("explorer.exe")
         .arg(path)
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("无法打开这个入口：{error}"))
+        .map_err(|error| format!("无法打开这个入口：{error}").into())
 }
 
 fn main() {
@@ -1107,7 +1136,8 @@ fn main() {
             storage::export_diary,
             get_app_icon,
             detect_running_apps,
-            launch_app
+            launch_app,
+            validate_relocation
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Serenook");
@@ -1116,6 +1146,19 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relocation_distinguishes_missing_targets_and_rejects_wrong_types() {
+        let executable = env::current_exe().unwrap();
+        assert!(local_launch_target(executable.to_str().unwrap(), ShortcutKind::Local).is_ok());
+        assert!(local_launch_target(executable.parent().unwrap().to_str().unwrap(), ShortcutKind::Folder).is_ok());
+        assert_eq!(local_launch_target(executable.to_str().unwrap(), ShortcutKind::Folder).unwrap_err().code, "open_failed");
+        let missing = executable.join("serenook-missing-target.txt");
+        assert!(local_launch_target(missing.to_str().unwrap(), ShortcutKind::Local).is_err());
+        let absent = env::temp_dir().join(format!("serenook-relocate-{}-missing.txt", std::process::id()));
+        assert_eq!(local_launch_target(absent.to_str().unwrap(), ShortcutKind::Local).unwrap_err().code, "target_missing");
+        assert_eq!(local_launch_target("https://example.com", ShortcutKind::Web).unwrap_err().code, "open_failed");
+    }
 
     fn shortcut(id: &str, name: &str, target: &str) -> AppShortcut {
         AppShortcut {

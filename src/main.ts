@@ -7,6 +7,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { dailyQuote } from "./daily-quotes";
 import { holidayForDate, holidayGreeting } from "./holiday-greetings";
 import { ScratchpadEditor } from "./scratchpad";
+import { ScratchpadTaskComposer, taskDestinationError } from "./scratchpad-task";
 import { locateText, textExcerpt } from "./text-location";
 import "./styles.css";
 import "./workspace.css";
@@ -366,6 +367,25 @@ const scratchpadEditor = new ScratchpadEditor(
   invoke,
 );
 type ReorderLayout = "vertical" | "grid";
+const scratchpadTaskComposer = new ScratchpadTaskComposer(
+  element<HTMLTextAreaElement>("scratchpad-input"), () => checklists, addScratchpadTask,
+  (message) => showToast(message, true),
+);
+
+async function addScratchpadTask(listId: string, content: string): Promise<void> {
+  await scratchpadEditor.flush();
+  const error = taskDestinationError(checklists, listId, content);
+  if (error) throw new Error(error);
+  const previous = checklists;
+  const destination = checklists.find((list) => list.id === listId)!;
+  const task: ChecklistTask = { id: crypto.randomUUID(), content, completed: false, important: false };
+  checklists = checklists.map((list) => list.id === listId ? { ...list, tasks: [...list.tasks, task] } : list);
+  try { await invoke("save_checklists", { checklists }); }
+  catch (error) { checklists = previous; throw error; }
+  renderChecklists();
+  showToast(`已加入「${destination.name}」`);
+}
+
 type ReorderPreviewKind = "module" | "shortcut" | "checklist" | "task";
 
 interface LiveReorderState {
@@ -833,6 +853,7 @@ function showToast(message: string, isError = false): void {
 }
 
 function errorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
   return typeof error === "string" ? error : error instanceof Error ? error.message : "发生了未知错误。";
 }
 
@@ -906,7 +927,7 @@ async function flushDiaryDraft(): Promise<void> {
 }
 
 async function flushWorkspaceEdits(): Promise<void> {
-  await Promise.all([flushDiaryDraft(), scratchpadEditor.flush()]);
+  await Promise.all([flushDiaryDraft(), scratchpadEditor.flush(), scratchpadTaskComposer.flush()]);
 }
 
 function renderDraftNotice(): void {
@@ -2512,6 +2533,66 @@ async function persist(): Promise<void> {
   await invoke("save_apps", { shortcuts });
 }
 
+function isMissingTarget(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "target_missing");
+}
+
+function offerRelocation(missing: AppShortcut[]): void {
+  document.getElementById("relocation-notice")?.remove();
+  const pending = missing.filter((old) => shortcuts.some((item) => item.id === old.id && item.target === old.target));
+  const current = pending[0];
+  if (!current) return;
+  const notice = document.createElement("div");
+  notice.id = "relocation-notice";
+  notice.className = "undo-notice relocation-notice";
+  notice.setAttribute("role", "status");
+  const message = document.createElement("span");
+  message.textContent = `找不到「${current.name}」的位置${pending.length > 1 ? `（另有 ${pending.length - 1} 个）` : ""}`;
+  const locate = document.createElement("button");
+  locate.type = "button";
+  locate.className = "text-action";
+  locate.textContent = "重新定位";
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "text-action";
+  dismiss.textContent = "稍后";
+  dismiss.onclick = () => notice.remove();
+  locate.onclick = async () => {
+    locate.disabled = true;
+    dismiss.disabled = true;
+    try {
+      const kind = shortcutKind(current);
+      const selected = await open(kind === "folder"
+        ? { title: `重新定位 · ${current.name}`, multiple: false, directory: true }
+        : { title: `重新定位 · ${current.name}`, multiple: false, directory: false,
+            filters: [{ name: "应用与文档", extensions: LOCAL_FILE_EXTENSIONS }] });
+      if (typeof selected !== "string") return;
+      await invoke("validate_relocation", { target: selected, kind });
+      // Read the latest record after the native picker closes; never resurrect a removed entry.
+      const latest = shortcuts.find((item) => item.id === current.id);
+      if (!latest || latest.target !== current.target) { notice.remove(); return; }
+      const replacement = { ...latest, target: selected, icon: inferIcon(latest.name, selected, kind) };
+      const previous = shortcuts;
+      shortcuts = shortcuts.map((item) => item.id === latest.id ? replacement : item);
+      try { await persist(); }
+      catch (error) { shortcuts = previous; throw error; }
+      render();
+      void hydrateAppIcons([replacement]);
+      void refreshRunningApps();
+      notice.remove();
+      showToast(`已更新「${latest.name}」的位置`);
+      offerRelocation(pending.slice(1));
+    } catch (error) {
+      message.textContent = `${errorMessage(error)} 原入口未改动。`;
+    } finally {
+      locate.disabled = false;
+      dismiss.disabled = false;
+    }
+  };
+  notice.append(message, locate, dismiss);
+  (document.querySelector("dialog[open]") ?? element<HTMLElement>("app-shell")).append(notice);
+}
+
 async function launch(shortcut: AppShortcut): Promise<void> {
   try {
     await invoke("launch_app", { target: shortcut.target, kind: shortcutKind(shortcut) });
@@ -2519,7 +2600,8 @@ async function launch(shortcut: AppShortcut): Promise<void> {
       window.setTimeout(() => void refreshRunningApps(), 800);
     }
   } catch (error) {
-    showToast(errorMessage(error), true);
+    if (isMissingTarget(error) && shortcutKind(shortcut) !== "web") offerRelocation([shortcut]);
+    else showToast(errorMessage(error), true);
   }
 }
 
@@ -2530,12 +2612,14 @@ async function launchAll(): Promise<void> {
   launchingAll = true;
   render();
   let failed = 0;
+  const missing: AppShortcut[] = [];
   try {
     for (const [index, shortcut] of awake.entries()) {
       try {
         await invoke("launch_app", { target: shortcut.target, kind: shortcutKind(shortcut) });
-      } catch {
+      } catch (error) {
         failed += 1;
+        if (isMissingTarget(error)) missing.push(shortcut);
       }
       if (index < awake.length - 1) await delay(LAUNCH_INTERVAL_MS);
     }
@@ -2544,6 +2628,7 @@ async function launchAll(): Promise<void> {
     render();
   }
   if (failed > 0) showToast(`有 ${failed} 个入口未能打开。`, true);
+  if (missing.length) offerRelocation(missing);
   window.setTimeout(() => void refreshRunningApps(), 800);
 }
 

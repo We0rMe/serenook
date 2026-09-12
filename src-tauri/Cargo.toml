@@ -1,6 +1,6 @@
 [package]
 name = "serenook"
-version = "0.12.3"
+version = "0.12.5"
 description = "A quiet Windows workspace for shortcuts, documents, and checklists"
 authors = ["JuvenileScholar"]
 edition = "2021"

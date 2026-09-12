@@ -109,6 +109,8 @@ select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 #checklist-focus-content .checklist-title-input { font-size: 20px; height: 36px; }
 #checklist-focus-content .checklist-task-frame { margin-top: 18px; }
 .task-link-dialog { padding: 26px; }
+#scratchpad-task-content { width: 100%; min-height: 100px; max-height: 220px; resize: vertical; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); color: var(--body); font: inherit; font-size: 14px; line-height: 1.8; user-select: text; }
+#scratchpad-task-form > label { display: block; margin-top: 18px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
 .task-link-dialog select { width: 100%; margin-top: 8px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); color: var(--text); font: inherit; font-size: 13px; }
 .search-highlight { animation: search-highlight 2s ease-out; }
 .search-dialog { width: min(590px, calc(100% - 56px)); padding: 25px; max-height: 76vh; }
@@ -151,6 +153,9 @@ select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
   transform: translateX(-50%);
 }
 .undo-notice .text-action { flex: none; color: var(--accent-active); }
+.relocation-notice { z-index: 30; bottom: 65px; }
+.relocation-notice > span { min-width: 0; overflow-wrap: anywhere; }
+.relocation-notice .text-action:last-child { color: var(--muted); }
 .backup-dialog { width: min(550px, calc(100% - 56px)); max-height: 80vh; padding: 26px; overflow: auto; }
 .backup-actions { display: flex; gap: 12px; margin-block: 18px; }
 .backup-list { color: var(--faint); font-size: 11px; }

@@ -377,7 +377,7 @@
               <span class="guide-number">02</span>
               <div>
                 <h3>常用入口</h3>
-                <p>进入“编辑”后，可添加应用、文档、文件夹或网址，也可拖动卡片调整顺序。“全开”会避开睡眠中与已运行的应用。</p>
+                <p>进入“编辑”后，可添加应用、文档、文件夹或网址，也可拖动卡片调整顺序。“全开”会避开睡眠中与已运行的应用。本地目标移走后，可从提示中重新定位，保留原有设置与关联。</p>
               </div>
             </article>
 
@@ -401,7 +401,7 @@
               <span class="guide-number">05</span>
               <div>
                 <h3>随手记</h3>
-                <p>展开就能写，不需要标题。停笔或离开时自动保存，再次打开保留阅读与光标位置。文字随工作台一同备份，位置记忆只留在本机。</p>
+                <p>展开就能写，停笔或离开时自动保存，再次打开保留阅读位置。选中文字后右键“加入清单”，可将想法记为一个任务，原文保留。文字随工作台一同备份。</p>
               </div>
             </article>
 
@@ -624,6 +624,19 @@
     <dialog id="checklist-focus-dialog" class="shortcut-dialog checklist-focus-dialog" aria-label="展开清单">
       <button id="checklist-focus-close" class="dialog-close-button focus-close" type="button" aria-label="收起清单"><span data-icon="close" aria-hidden="true"></span></button>
       <div id="checklist-focus-content"></div>
+    </dialog>
+
+    <dialog id="scratchpad-task-dialog" class="shortcut-dialog task-link-dialog" aria-labelledby="scratchpad-task-title">
+      <form id="scratchpad-task-form" novalidate>
+        <header class="dialog-heading"><h2 id="scratchpad-task-title">加入清单</h2><button id="scratchpad-task-close" class="dialog-close-button" type="button" aria-label="取消加入清单"><span data-icon="close" aria-hidden="true"></span></button></header>
+        <label for="scratchpad-task-list">放入哪张清单</label>
+        <select id="scratchpad-task-list" autofocus></select>
+        <label for="scratchpad-task-content">任务内容</label>
+        <textarea id="scratchpad-task-content" rows="4" aria-describedby="scratchpad-task-hint scratchpad-task-error"></textarea>
+        <p id="scratchpad-task-hint" class="field-hint">一次记下一件事，随手记中的原文保留。</p>
+        <p id="scratchpad-task-error" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions"><span class="dialog-spacer"></span><button id="scratchpad-task-save" class="primary-button" type="submit">加入</button></div>
+      </form>
     </dialog>
 
     <dialog id="task-link-dialog" class="shortcut-dialog task-link-dialog" aria-labelledby="task-link-title">
