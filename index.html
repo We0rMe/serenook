@@ -294,6 +294,14 @@
               </div>
             </div>
           </div>
+          <button id="installed-apps-setting-button" class="setting-item" type="button">
+            <span class="setting-item-icon" data-icon="app" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>导入本机应用</strong>
+              <small>从已安装的应用中批量选择</small>
+            </span>
+            <span class="setting-item-chevron" data-icon="arrow" aria-hidden="true"></span>
+          </button>
           <button id="theme-setting-button" class="setting-item" type="button" aria-expanded="false">
             <span class="setting-item-icon" data-icon="moon" aria-hidden="true"></span>
             <span class="setting-item-copy">
@@ -377,7 +385,7 @@
               <span class="guide-number">02</span>
               <div>
                 <h3>常用入口</h3>
-                <p>进入“编辑”后，可添加应用、文档、文件夹或网址，也可拖动卡片调整顺序。“全开”会避开睡眠中与已运行的应用。本地目标移走后，可从提示中重新定位，保留原有设置与关联。</p>
+                <p>进入“编辑”后，可添加应用、文档、文件夹或网址，也可拖动卡片调整顺序。应用较多时，可从设置批量选择本机已安装的应用，统一放入睡眠区。“全开”会避开睡眠中与已运行的应用。本地目标移走后，可重新定位并保留原有设置。</p>
               </div>
             </article>
 
@@ -463,6 +471,10 @@
             <input type="radio" name="shortcut-kind" value="folder" />
             <span>本地文件夹</span>
           </label>
+          <label id="installed-app-kind-option" class="kind-option" hidden>
+            <input type="radio" name="shortcut-kind" value="app" />
+            <span>已安装应用</span>
+          </label>
         </fieldset>
 
         <label for="shortcut-name">名称</label>
@@ -489,6 +501,38 @@
           <button class="primary-button" type="submit">保存</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="installed-apps-dialog" class="shortcut-dialog installed-apps-dialog" aria-labelledby="installed-apps-title">
+      <header class="dialog-heading installed-apps-heading">
+        <div>
+          <span class="dialog-kicker">LOCAL APPS</span>
+          <h2 id="installed-apps-title">选择本机应用</h2>
+        </div>
+        <button id="installed-apps-close" class="dialog-close-button" type="button" aria-label="关闭应用选择">
+          <span data-icon="close" aria-hidden="true"></span>
+        </button>
+      </header>
+      <p class="installed-apps-intro">读取 Windows 中已安装的应用。选中后，统一放入睡眠区。</p>
+      <div class="installed-apps-search">
+        <span data-icon="search" aria-hidden="true"></span>
+        <input id="installed-apps-search-input" type="search" placeholder="查找应用" autocomplete="off" />
+      </div>
+      <div class="installed-apps-toolbar">
+        <span id="installed-apps-result-count">正在读取…</span>
+        <div>
+          <button id="installed-apps-select-all" class="text-action" type="button" disabled>全选结果</button>
+          <button id="installed-apps-clear" class="text-action" type="button" disabled>清除</button>
+        </div>
+      </div>
+      <div id="installed-apps-list" class="installed-apps-list" aria-busy="true"></div>
+      <p id="installed-apps-status" class="field-hint installed-apps-status" role="status" aria-live="polite"></p>
+      <div class="dialog-actions installed-apps-actions">
+        <span id="installed-apps-selection">尚未选择</span>
+        <span class="dialog-spacer"></span>
+        <button id="installed-apps-cancel" class="secondary-button" type="button">取消</button>
+        <button id="installed-apps-import" class="primary-button" type="button" disabled>导入睡眠区</button>
+      </div>
     </dialog>
 
     <dialog id="schedule-dialog" class="shortcut-dialog schedule-dialog">

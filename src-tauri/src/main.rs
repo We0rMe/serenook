@@ -15,23 +15,26 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 use windows::{
-    core::{PCWSTR, PWSTR},
+    core::{HSTRING, PCWSTR, PWSTR},
+    Management::Deployment::PackageManager,
     Win32::{
-        Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
+        Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS},
         Graphics::Gdi::{
             CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
             BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
         },
         Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
         System::{
+            Com::{CoTaskMemFree, IBindCtx},
             Diagnostics::ToolHelp::{
                 CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
                 TH32CS_SNAPPROCESS,
             },
             Registry::{
-                RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
-                RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE,
-                REG_OPTION_NON_VOLATILE, REG_SZ,
+                RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegEnumKeyExW, RegOpenKeyExW,
+                RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
+                KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_32KEY,
+                KEY_WOW64_64KEY, REG_DWORD, REG_EXPAND_SZ, REG_OPTION_NON_VOLATILE, REG_SZ,
             },
             Threading::{
                 OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -39,13 +42,16 @@ use windows::{
             },
         },
         UI::{
-            Shell::{SHGetFileInfoW, ShellExecuteW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON},
-            WindowsAndMessaging::{DestroyIcon, DrawIconEx, DI_NORMAL, SW_SHOWNORMAL},
+            Shell::{
+                Common::ITEMIDLIST, SHGetFileInfoW, SHParseDisplayName, ShellExecuteW, SHFILEINFOW,
+                SHGFI_ICON, SHGFI_LARGEICON, SHGFI_PIDL,
+            },
+            WindowsAndMessaging::{DestroyIcon, DrawIconEx, DI_NORMAL, HICON, SW_SHOWNORMAL},
         },
     },
 };
 
-const MAX_SHORTCUTS: usize = 40;
+const MAX_SHORTCUTS: usize = 500;
 const MAX_CHECKLISTS: usize = 24;
 const MAX_TASKS_PER_CHECKLIST: usize = 100;
 const MAX_CHECKLIST_NAME_CHARACTERS: usize = 32;
@@ -81,6 +87,7 @@ enum ShortcutKind {
     Local,
     Web,
     Folder,
+    App,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -96,6 +103,28 @@ struct AppShortcut {
     sleeping: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     wake_days: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstalledAppCandidate {
+    id: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    publisher: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<ShortcutKind>,
+    source: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct StartMenuShortcut {
+    normalized_name: String,
+    path: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -315,6 +344,475 @@ fn set_launch_on_startup(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn registry_string(key: HKEY, name: &str) -> Option<String> {
+    let name = wide_string(OsStr::new(name));
+    let mut value_type = Default::default();
+    let mut byte_count = 0_u32;
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            PCWSTR(name.as_ptr()),
+            None,
+            Some(&mut value_type),
+            None,
+            Some(&mut byte_count),
+        )
+    };
+    if status != ERROR_SUCCESS || !matches!(value_type, REG_SZ | REG_EXPAND_SZ) || byte_count < 2 {
+        return None;
+    }
+
+    let mut buffer = vec![0_u16; byte_count as usize / 2 + 1];
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            PCWSTR(name.as_ptr()),
+            None,
+            Some(&mut value_type),
+            Some(buffer.as_mut_ptr().cast::<u8>()),
+            Some(&mut byte_count),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+    let length = buffer
+        .iter()
+        .position(|character| *character == 0)
+        .unwrap_or(buffer.len());
+    let value = String::from_utf16_lossy(&buffer[..length])
+        .trim()
+        .to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn registry_dword(key: HKEY, name: &str) -> Option<u32> {
+    let name = wide_string(OsStr::new(name));
+    let mut value_type = Default::default();
+    let mut value = 0_u32;
+    let mut byte_count = std::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            PCWSTR(name.as_ptr()),
+            None,
+            Some(&mut value_type),
+            Some((&mut value as *mut u32).cast::<u8>()),
+            Some(&mut byte_count),
+        )
+    };
+    (status == ERROR_SUCCESS && value_type == REG_DWORD && byte_count == 4).then_some(value)
+}
+
+fn expand_environment_variables(value: &str) -> String {
+    let mut expanded = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(open) = rest.find('%') {
+        expanded.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('%') else {
+            expanded.push_str(&rest[open..]);
+            return expanded;
+        };
+        let variable = &after_open[..close];
+        match env::vars_os().find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case(variable))
+        {
+            Some((_, value)) => expanded.push_str(&value.to_string_lossy()),
+            None => expanded.push_str(&rest[open..open + close + 2]),
+        }
+        rest = &after_open[close + 1..];
+    }
+    expanded.push_str(rest);
+    expanded
+}
+
+fn display_icon_path(value: &str) -> Option<PathBuf> {
+    let trimmed = value.trim();
+    let path = if let Some(quoted) = trimmed.strip_prefix('"') {
+        quoted.split('"').next().unwrap_or(quoted)
+    } else if let Some((path, index)) = trimmed.rsplit_once(',') {
+        if index.trim().parse::<i32>().is_ok() {
+            path
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+    let path = PathBuf::from(expand_environment_variables(path.trim().trim_matches('"')));
+    let launchable = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "exe" | "lnk"));
+    (launchable && path.is_file()).then_some(path)
+}
+
+fn normalized_app_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn collect_start_menu_shortcuts(directory: &Path, depth: u8, output: &mut Vec<StartMenuShortcut>) {
+    if depth > 6 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_start_menu_shortcuts(&path, depth + 1, output);
+            continue;
+        }
+        if !path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
+        {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let lower = name.to_lowercase();
+        if [
+            "uninstall",
+            "remove",
+            "help",
+            "readme",
+            "website",
+            "卸载",
+            "帮助",
+        ]
+        .iter()
+        .any(|word| lower.contains(word))
+        {
+            continue;
+        }
+        let normalized_name = normalized_app_name(name);
+        if !normalized_name.is_empty() {
+            output.push(StartMenuShortcut {
+                normalized_name,
+                path,
+            });
+        }
+    }
+}
+
+fn start_menu_shortcuts() -> Vec<StartMenuShortcut> {
+    let mut shortcuts = Vec::new();
+    for (variable, suffix) in [
+        ("APPDATA", r"Microsoft\Windows\Start Menu\Programs"),
+        ("PROGRAMDATA", r"Microsoft\Windows\Start Menu\Programs"),
+    ] {
+        if let Some(root) = env::var_os(variable) {
+            collect_start_menu_shortcuts(&PathBuf::from(root).join(suffix), 0, &mut shortcuts);
+        }
+    }
+    shortcuts
+}
+
+fn matching_start_menu_shortcut(name: &str, shortcuts: &[StartMenuShortcut]) -> Option<PathBuf> {
+    let normalized = normalized_app_name(name);
+    shortcuts
+        .iter()
+        .find(|shortcut| shortcut.normalized_name == normalized)
+        .or_else(|| {
+            shortcuts
+                .iter()
+                .filter(|shortcut| {
+                    normalized
+                        .chars()
+                        .count()
+                        .min(shortcut.normalized_name.chars().count())
+                        >= 6
+                        && (normalized.contains(&shortcut.normalized_name)
+                            || shortcut.normalized_name.contains(&normalized))
+                })
+                .min_by_key(|shortcut| {
+                    normalized
+                        .chars()
+                        .count()
+                        .abs_diff(shortcut.normalized_name.chars().count())
+                })
+        })
+        .map(|shortcut| shortcut.path.clone())
+}
+
+fn matching_install_location_executable(name: &str, location: &str) -> Option<PathBuf> {
+    let directory = PathBuf::from(expand_environment_variables(location));
+    let normalized = normalized_app_name(name);
+    let entries = fs::read_dir(directory).ok()?;
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+        })
+        .filter_map(|path| {
+            let stem = path.file_stem()?.to_str()?;
+            let candidate = normalized_app_name(stem);
+            let lower = stem.to_ascii_lowercase();
+            if [
+                "unins",
+                "uninstall",
+                "update",
+                "helper",
+                "crash",
+                "report",
+                "service",
+            ]
+            .iter()
+            .any(|word| lower.contains(word))
+            {
+                return None;
+            }
+            let score = if candidate == normalized {
+                0
+            } else if normalized.contains(&candidate) || candidate.contains(&normalized) {
+                1
+            } else {
+                2
+            };
+            Some((score, path))
+        })
+        .min_by_key(|(score, _)| *score)
+        .and_then(|(score, path)| (score < 2).then_some(path))
+}
+
+fn enumerate_uninstall_key(
+    hive: HKEY,
+    hive_name: &str,
+    view_name: &str,
+    view: windows::Win32::System::Registry::REG_SAM_FLAGS,
+    start_menu: &[StartMenuShortcut],
+    output: &mut Vec<InstalledAppCandidate>,
+) {
+    let uninstall_path = wide_string(OsStr::new(
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+    ));
+    let mut key = HKEY::default();
+    let status = unsafe {
+        RegOpenKeyExW(
+            hive,
+            PCWSTR(uninstall_path.as_ptr()),
+            None,
+            KEY_ENUMERATE_SUB_KEYS | view,
+            &mut key,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return;
+    }
+
+    let mut index = 0_u32;
+    loop {
+        let mut buffer = vec![0_u16; 512];
+        let mut length = (buffer.len() - 1) as u32;
+        let status = unsafe {
+            RegEnumKeyExW(
+                key,
+                index,
+                Some(PWSTR(buffer.as_mut_ptr())),
+                &mut length,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        if status == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+        index += 1;
+        if status != ERROR_SUCCESS {
+            continue;
+        }
+        let subkey_name = String::from_utf16_lossy(&buffer[..length as usize]);
+        let subkey_wide = wide_string(OsStr::new(&subkey_name));
+        let mut subkey = HKEY::default();
+        let status = unsafe {
+            RegOpenKeyExW(
+                key,
+                PCWSTR(subkey_wide.as_ptr()),
+                None,
+                KEY_QUERY_VALUE | view,
+                &mut subkey,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            continue;
+        }
+
+        let name = registry_string(subkey, "DisplayName");
+        let hidden = registry_dword(subkey, "SystemComponent") == Some(1)
+            || registry_dword(subkey, "NoDisplay") == Some(1)
+            || registry_string(subkey, "ParentKeyName").is_some()
+            || registry_string(subkey, "ReleaseType").is_some_and(|release_type| {
+                let release_type = release_type.to_ascii_lowercase();
+                ["update", "hotfix", "security update"]
+                    .iter()
+                    .any(|kind| release_type.contains(kind))
+            });
+        if let Some(name) = name.filter(|_| !hidden) {
+            let target = matching_start_menu_shortcut(&name, start_menu)
+                .or_else(|| {
+                    registry_string(subkey, "DisplayIcon")
+                        .and_then(|value| display_icon_path(&value))
+                })
+                .or_else(|| {
+                    registry_string(subkey, "InstallLocation")
+                        .and_then(|location| matching_install_location_executable(&name, &location))
+                });
+            output.push(InstalledAppCandidate {
+                id: format!("desktop:{hive_name}:{view_name}:{subkey_name}"),
+                name,
+                publisher: registry_string(subkey, "Publisher"),
+                version: registry_string(subkey, "DisplayVersion"),
+                target: target
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
+                kind: target.map(|_| ShortcutKind::Local),
+                source: "desktop",
+            });
+        }
+        let _ = unsafe { RegCloseKey(subkey) };
+    }
+    let _ = unsafe { RegCloseKey(key) };
+}
+
+fn packaged_app_candidates() -> Vec<InstalledAppCandidate> {
+    let mut candidates = Vec::new();
+    let Ok(manager) = PackageManager::new() else {
+        return candidates;
+    };
+    let Ok(packages) = manager.FindPackagesByUserSecurityId(&HSTRING::new()) else {
+        return candidates;
+    };
+    for package in packages {
+        if package.IsFramework().unwrap_or(false) || package.IsResourcePackage().unwrap_or(false) {
+            continue;
+        }
+        let publisher = package
+            .PublisherDisplayName()
+            .ok()
+            .map(|value| value.to_string())
+            .filter(|value| !value.trim().is_empty());
+        let version = package
+            .Id()
+            .ok()
+            .and_then(|id| id.Version().ok())
+            .map(|version| {
+                format!(
+                    "{}.{}.{}.{}",
+                    version.Major, version.Minor, version.Build, version.Revision
+                )
+            });
+        let Ok(entries) = package.GetAppListEntries() else {
+            continue;
+        };
+        for entry in entries {
+            let Ok(app_user_model_id) = entry.AppUserModelId() else {
+                continue;
+            };
+            let target = app_user_model_id.to_string();
+            let name = entry
+                .DisplayInfo()
+                .and_then(|display| display.DisplayName())
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            if name.trim().is_empty() || target.trim().is_empty() {
+                continue;
+            }
+            candidates.push(InstalledAppCandidate {
+                id: format!("store:{target}"),
+                name,
+                publisher: publisher.clone(),
+                version: version.clone(),
+                target: Some(target),
+                kind: Some(ShortcutKind::App),
+                source: "store",
+            });
+        }
+    }
+    candidates
+}
+
+#[tauri::command]
+fn list_installed_apps() -> Result<Vec<InstalledAppCandidate>, String> {
+    let start_menu = start_menu_shortcuts();
+    let mut candidates = Vec::new();
+    enumerate_uninstall_key(
+        HKEY_CURRENT_USER,
+        "current-user",
+        "native",
+        Default::default(),
+        &start_menu,
+        &mut candidates,
+    );
+    enumerate_uninstall_key(
+        HKEY_LOCAL_MACHINE,
+        "local-machine",
+        "64",
+        KEY_WOW64_64KEY,
+        &start_menu,
+        &mut candidates,
+    );
+    enumerate_uninstall_key(
+        HKEY_LOCAL_MACHINE,
+        "local-machine",
+        "32",
+        KEY_WOW64_32KEY,
+        &start_menu,
+        &mut candidates,
+    );
+    candidates.extend(packaged_app_candidates());
+
+    candidates.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.publisher.cmp(&right.publisher))
+    });
+    let mut positions: HashMap<String, usize> = HashMap::new();
+    let mut deduplicated: Vec<InstalledAppCandidate> = Vec::new();
+    for candidate in candidates {
+        let key = format!(
+            "{}\u{0}{}\u{0}{}",
+            candidate.name.to_lowercase(),
+            candidate.publisher.as_deref().unwrap_or("").to_lowercase(),
+            candidate.version.as_deref().unwrap_or("").to_lowercase(),
+        );
+        if let Some(index) = positions.get(&key).copied() {
+            if deduplicated[index].target.is_none() && candidate.target.is_some() {
+                deduplicated[index] = candidate;
+            }
+        } else {
+            positions.insert(key, deduplicated.len());
+            deduplicated.push(candidate);
+        }
+    }
+    Ok(deduplicated)
+}
+
+fn validate_app_target(target: &str) -> Result<String, String> {
+    let trimmed = target.trim();
+    if trimmed.is_empty()
+        || trimmed.chars().count() > 512
+        || trimmed.chars().any(char::is_control)
+        || !trimmed.contains('!')
+    {
+        return Err("已安装应用的启动标识无效。".into());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn validate_target(target: &str, require_exists: bool) -> Result<PathBuf, String> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
@@ -512,6 +1010,9 @@ fn validate_shortcuts(shortcuts: &[AppShortcut]) -> Result<(), String> {
             }
             ShortcutKind::Folder => {
                 validate_folder_target(&shortcut.target, false)?;
+            }
+            ShortcutKind::App => {
+                validate_app_target(&shortcut.target)?;
             }
         }
     }
@@ -837,29 +1338,9 @@ fn stylize_line_art(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     output
 }
 
-fn extract_icon_data_url(path: &PathBuf) -> Result<String, String> {
+fn icon_handle_data_url(icon: HICON) -> Result<String, String> {
     const ICON_SIZE: i32 = 64;
-
-    let wide_path: Vec<u16> = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
     unsafe {
-        let mut file_info = SHFILEINFOW::default();
-        let result = SHGetFileInfoW(
-            PCWSTR(wide_path.as_ptr()),
-            FILE_FLAGS_AND_ATTRIBUTES(0),
-            Some(&mut file_info),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON | SHGFI_LARGEICON,
-        );
-        if result == 0 || file_info.hIcon.0.is_null() {
-            return Err("Windows 未返回该应用的图标。".into());
-        }
-
-        let icon = file_info.hIcon;
         let device_context = CreateCompatibleDC(None);
         if device_context.0.is_null() {
             let _ = DestroyIcon(icon);
@@ -940,6 +1421,60 @@ fn extract_icon_data_url(path: &PathBuf) -> Result<String, String> {
         let line_art = stylize_line_art(ICON_SIZE as u32, ICON_SIZE as u32, &rgba);
         rgba_png_data_url(ICON_SIZE as u32, ICON_SIZE as u32, &line_art)
     }
+}
+
+fn extract_icon_data_url(path: &PathBuf) -> Result<String, String> {
+    let wide_path = wide_string(path.as_os_str());
+    let mut file_info = SHFILEINFOW::default();
+    let result = unsafe {
+        SHGetFileInfoW(
+            PCWSTR(wide_path.as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut file_info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        )
+    };
+    if result == 0 || file_info.hIcon.0.is_null() {
+        return Err("Windows 未返回该应用的图标。".into());
+    }
+    icon_handle_data_url(file_info.hIcon)
+}
+
+fn extract_packaged_app_icon_data_url(target: &str) -> Result<String, String> {
+    let target = validate_app_target(target)?;
+    let parsing_name = wide_string(OsStr::new(&format!(r"shell:AppsFolder\{target}")));
+    let mut item_id_list: *mut ITEMIDLIST = std::ptr::null_mut();
+    unsafe {
+        SHParseDisplayName(
+            PCWSTR(parsing_name.as_ptr()),
+            None::<&IBindCtx>,
+            &mut item_id_list,
+            0,
+            None,
+        )
+        .map_err(|error| format!("Windows 未找到该应用图标：{error}"))?;
+    }
+    if item_id_list.is_null() {
+        return Err("Windows 未返回该应用图标。".into());
+    }
+
+    let mut file_info = SHFILEINFOW::default();
+    let result = unsafe {
+        let result = SHGetFileInfoW(
+            PCWSTR(item_id_list.cast::<u16>()),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut file_info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON | SHGFI_PIDL,
+        );
+        CoTaskMemFree(Some(item_id_list.cast()));
+        result
+    };
+    if result == 0 || file_info.hIcon.0.is_null() {
+        return Err("Windows 未返回该应用图标。".into());
+    }
+    icon_handle_data_url(file_info.hIcon)
 }
 
 #[tauri::command]
@@ -1064,6 +1599,9 @@ fn get_app_icon(target: String, kind: ShortcutKind) -> Result<Option<String>, St
             validate_folder_target(&target, true)?;
             return Ok(None);
         }
+        ShortcutKind::App => {
+            return Ok(extract_packaged_app_icon_data_url(&target).ok());
+        }
     };
     Ok(extract_icon_data_url(&path).ok())
 }
@@ -1075,21 +1613,33 @@ struct LaunchError {
 }
 
 impl From<String> for LaunchError {
-    fn from(message: String) -> Self { Self { code: "open_failed", message } }
+    fn from(message: String) -> Self {
+        Self {
+            code: "open_failed",
+            message,
+        }
+    }
 }
 
 fn local_launch_target(target: &str, kind: ShortcutKind) -> Result<PathBuf, LaunchError> {
     let path = match kind {
         ShortcutKind::Local => validate_target(target, false)?,
         ShortcutKind::Folder => validate_folder_target(target, false)?,
-        ShortcutKind::Web => return Err("网址无需重新定位。".to_string().into()),
+        ShortcutKind::Web | ShortcutKind::App => {
+            return Err("这个入口无需重新定位。".to_string().into())
+        }
     };
     let metadata = fs::metadata(&path).map_err(|error| LaunchError {
-        code: if error.kind() == std::io::ErrorKind::NotFound { "target_missing" } else { "open_failed" },
+        code: if error.kind() == std::io::ErrorKind::NotFound {
+            "target_missing"
+        } else {
+            "open_failed"
+        },
         message: "暂时无法访问这个位置。".into(),
     })?;
     if (matches!(kind, ShortcutKind::Folder) && !metadata.is_dir())
-        || (matches!(kind, ShortcutKind::Local) && !metadata.is_file()) {
+        || (matches!(kind, ShortcutKind::Local) && !metadata.is_file())
+    {
         return Err("请选择相同类型的本地目标。".to_string().into());
     }
     Ok(path)
@@ -1102,7 +1652,17 @@ fn validate_relocation(target: String, kind: ShortcutKind) -> Result<(), LaunchE
 
 #[tauri::command]
 fn launch_app(target: String, kind: ShortcutKind) -> Result<(), LaunchError> {
-    if matches!(kind, ShortcutKind::Web) { return open_web_url(&target).map_err(Into::into); }
+    if matches!(kind, ShortcutKind::Web) {
+        return open_web_url(&target).map_err(Into::into);
+    }
+    if matches!(kind, ShortcutKind::App) {
+        let target = validate_app_target(&target)?;
+        return Command::new("explorer.exe")
+            .arg(format!(r"shell:AppsFolder\{target}"))
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("无法打开这个应用：{error}").into());
+    }
     let path = local_launch_target(&target, kind)?;
     Command::new("explorer.exe")
         .arg(path)
@@ -1134,6 +1694,7 @@ fn main() {
             storage::inspect_backup,
             storage::restore_backup,
             storage::export_diary,
+            list_installed_apps,
             get_app_icon,
             detect_running_apps,
             launch_app,
@@ -1148,16 +1709,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn installed_app_scan_returns_ordered_candidates_with_valid_launch_targets() {
+        let candidates = list_installed_apps().unwrap();
+        assert!(!candidates.is_empty());
+        assert!(candidates
+            .windows(2)
+            .all(|pair| { pair[0].name.to_lowercase() <= pair[1].name.to_lowercase() }));
+        if let Some(target) = candidates
+            .iter()
+            .find(|candidate| candidate.kind == Some(ShortcutKind::App))
+            .and_then(|candidate| candidate.target.as_deref())
+        {
+            assert!(extract_packaged_app_icon_data_url(target).is_ok());
+        }
+        for candidate in candidates {
+            match (candidate.kind, candidate.target) {
+                (Some(ShortcutKind::Local), Some(target)) => {
+                    assert!(validate_target(&target, true).is_ok());
+                }
+                (Some(ShortcutKind::App), Some(target)) => {
+                    assert!(validate_app_target(&target).is_ok());
+                }
+                (None, None) => {}
+                _ => panic!("installed application target and kind must be paired"),
+            }
+        }
+    }
+
+    #[test]
+    fn display_icon_parser_accepts_a_quoted_executable_with_an_index() {
+        let executable = env::current_exe().unwrap();
+        let display_icon = format!(r#""{}",0"#, executable.display());
+        assert_eq!(display_icon_path(&display_icon), Some(executable));
+    }
+
+    #[test]
     fn relocation_distinguishes_missing_targets_and_rejects_wrong_types() {
         let executable = env::current_exe().unwrap();
         assert!(local_launch_target(executable.to_str().unwrap(), ShortcutKind::Local).is_ok());
-        assert!(local_launch_target(executable.parent().unwrap().to_str().unwrap(), ShortcutKind::Folder).is_ok());
-        assert_eq!(local_launch_target(executable.to_str().unwrap(), ShortcutKind::Folder).unwrap_err().code, "open_failed");
+        assert!(local_launch_target(
+            executable.parent().unwrap().to_str().unwrap(),
+            ShortcutKind::Folder
+        )
+        .is_ok());
+        assert_eq!(
+            local_launch_target(executable.to_str().unwrap(), ShortcutKind::Folder)
+                .unwrap_err()
+                .code,
+            "open_failed"
+        );
         let missing = executable.join("serenook-missing-target.txt");
         assert!(local_launch_target(missing.to_str().unwrap(), ShortcutKind::Local).is_err());
-        let absent = env::temp_dir().join(format!("serenook-relocate-{}-missing.txt", std::process::id()));
-        assert_eq!(local_launch_target(absent.to_str().unwrap(), ShortcutKind::Local).unwrap_err().code, "target_missing");
-        assert_eq!(local_launch_target("https://example.com", ShortcutKind::Web).unwrap_err().code, "open_failed");
+        let absent = env::temp_dir().join(format!(
+            "serenook-relocate-{}-missing.txt",
+            std::process::id()
+        ));
+        assert_eq!(
+            local_launch_target(absent.to_str().unwrap(), ShortcutKind::Local)
+                .unwrap_err()
+                .code,
+            "target_missing"
+        );
+        assert_eq!(
+            local_launch_target("https://example.com", ShortcutKind::Web)
+                .unwrap_err()
+                .code,
+            "open_failed"
+        );
     }
 
     fn shortcut(id: &str, name: &str, target: &str) -> AppShortcut {

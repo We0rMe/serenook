@@ -13,7 +13,7 @@ import "./styles.css";
 import "./workspace.css";
 
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet" | "pdf" | "presentation";
-type ShortcutKind = "local" | "web" | "folder";
+type ShortcutKind = "local" | "web" | "folder" | "app";
 type ThemePreference = "system" | "light" | "dark";
 type WorkspaceModuleId = "shortcuts" | "checklists" | "diaries" | "scratchpad";
 
@@ -25,6 +25,16 @@ interface AppShortcut {
   kind: ShortcutKind;
   sleeping: boolean;
   wakeDays?: number[];
+}
+
+interface InstalledAppCandidate {
+  id: string;
+  name: string;
+  publisher?: string;
+  version?: string;
+  target?: string;
+  kind?: ShortcutKind;
+  source: "desktop" | "store";
 }
 
 interface AppSettings {
@@ -80,6 +90,7 @@ interface BackupSummary {
 }
 
 const DEFAULT_ANNIVERSARY_NAME = "Love";
+const MAX_SHORTCUTS = 500;
 const MAX_ANNIVERSARY_NAME_LENGTH = 7;
 const MAX_CHECKLIST_NAME_LENGTH = 32;
 const MAX_TASK_CONTENT_LENGTH = 200;
@@ -352,6 +363,11 @@ let undoTimer: number | undefined;
 let updateCheckPending = false;
 let selectedBackup: string | null = null;
 let restoringBackup = false;
+let installedAppCandidates: InstalledAppCandidate[] = [];
+const selectedInstalledAppIds = new Set<string>();
+let installedAppsLoading = false;
+let installedAppsImporting = false;
+let installedAppsLoadError = "";
 const searchDialog = element<HTMLDialogElement>("search-dialog");
 const searchInput = element<HTMLInputElement>("search-input");
 const searchResults = element<HTMLElement>("search-results");
@@ -359,6 +375,16 @@ const checklistFocusDialog = element<HTMLDialogElement>("checklist-focus-dialog"
 const checklistFocusContent = element<HTMLElement>("checklist-focus-content");
 const taskLinkDialog = element<HTMLDialogElement>("task-link-dialog");
 const backupDialog = element<HTMLDialogElement>("backup-dialog");
+const installedAppsSettingButton = element<HTMLButtonElement>("installed-apps-setting-button");
+const installedAppsDialog = element<HTMLDialogElement>("installed-apps-dialog");
+const installedAppsSearchInput = element<HTMLInputElement>("installed-apps-search-input");
+const installedAppsList = element<HTMLElement>("installed-apps-list");
+const installedAppsResultCount = element<HTMLElement>("installed-apps-result-count");
+const installedAppsStatus = element<HTMLElement>("installed-apps-status");
+const installedAppsSelection = element<HTMLElement>("installed-apps-selection");
+const installedAppsSelectAll = element<HTMLButtonElement>("installed-apps-select-all");
+const installedAppsClear = element<HTMLButtonElement>("installed-apps-clear");
+const installedAppsImport = element<HTMLButtonElement>("installed-apps-import");
 const diaryMonthSelect = element<HTMLSelectElement>("diary-month-select");
 const scratchpadEditor = new ScratchpadEditor(
   element<HTMLTextAreaElement>("scratchpad-input"),
@@ -618,6 +644,7 @@ function clearLiveReorder(state: LiveReorderState): void {
 function shortcutKind(shortcut: AppShortcut): ShortcutKind {
   if (shortcut.kind === "web") return "web";
   if (shortcut.kind === "folder") return "folder";
+  if (shortcut.kind === "app") return "app";
   return "local";
 }
 
@@ -637,6 +664,7 @@ function selectedShortcutKind(): ShortcutKind {
   const selected = form.querySelector<HTMLInputElement>('input[name="shortcut-kind"]:checked');
   if (selected?.value === "web") return "web";
   if (selected?.value === "folder") return "folder";
+  if (selected?.value === "app") return "app";
   return "local";
 }
 
@@ -644,16 +672,19 @@ function setTargetMode(kind: ShortcutKind, clearTarget = false): void {
   if (clearTarget) targetInput.value = "";
   const isWeb = kind === "web";
   const isFolder = kind === "folder";
+  const isApp = kind === "app";
   targetInput.readOnly = !isWeb;
   targetInput.placeholder = isWeb ? "https://example.com" : "";
-  browseButton.hidden = isWeb;
-  targetRow.classList.toggle("is-web", isWeb);
-  targetLabel.textContent = isWeb ? "网址" : isFolder ? "文件夹位置" : "程序位置";
+  browseButton.hidden = isWeb || isApp;
+  targetRow.classList.toggle("is-web", isWeb || isApp);
+  targetLabel.textContent = isWeb ? "网址" : isFolder ? "文件夹位置" : isApp ? "应用标识" : "程序位置";
   targetHint.textContent = isWeb
     ? "请输入以 http:// 或 https:// 开头的网址"
     : isFolder
       ? "选择一个常用文件夹"
-      : "支持常见应用与文档";
+      : isApp
+        ? "由 Windows 提供的应用入口"
+        : "支持常见应用与文档";
 }
 
 function isoDateForInput(date = new Date()): string {
@@ -823,6 +854,7 @@ function fileIconForTarget(target: string): string | null {
 function inferIcon(name: string, target: string, kind: ShortcutKind): IconName {
   if (kind === "web") return "compass";
   if (kind === "folder") return "folder";
+  if (kind === "app") return "app";
   const value = `${name} ${target}`.toLowerCase();
   const extension = targetExtension(target);
   if (extension && SHEET_EXTENSIONS.has(extension)) return "sheet";
@@ -2671,8 +2703,11 @@ async function hydrateAppIcons(items: AppShortcut[]): Promise<void> {
   });
   if (pending.length === 0) return;
 
-  await Promise.all(
-    pending.map(async (shortcut) => {
+  const queue = [...pending];
+  const workers = Array.from({ length: Math.min(6, queue.length) }, async () => {
+    while (queue.length) {
+      const shortcut = queue.shift();
+      if (!shortcut) break;
       const key = iconCacheKey(shortcut);
       try {
         const data = await invoke<string | null>("get_app_icon", {
@@ -2683,8 +2718,9 @@ async function hydrateAppIcons(items: AppShortcut[]): Promise<void> {
       } catch {
         appIcons.set(key, null);
       }
-    }),
-  );
+    }
+  });
+  await Promise.all(workers);
   render();
 }
 
@@ -2692,6 +2728,11 @@ function openEditor(shortcut?: AppShortcut): void {
   form.reset();
   formError.hidden = true;
   const kind = shortcut ? shortcutKind(shortcut) : "local";
+  const installedKindOption = element<HTMLElement>("installed-app-kind-option");
+  form.querySelector<HTMLElement>(".shortcut-kind-selector")?.classList.toggle("is-installed", kind === "app");
+  installedKindOption.hidden = kind !== "app";
+  form.querySelectorAll<HTMLElement>(".shortcut-kind-selector .kind-option:not(#installed-app-kind-option)")
+    .forEach((option) => { option.hidden = kind === "app"; });
   const kindInput = form.querySelector<HTMLInputElement>(`input[name="shortcut-kind"][value="${kind}"]`);
   if (kindInput) kindInput.checked = true;
   setTargetMode(kind);
@@ -2742,7 +2783,7 @@ function closeEditor(): void {
 
 async function chooseTarget(): Promise<void> {
   const kind = selectedShortcutKind();
-  if (kind === "web") return;
+  if (kind === "web" || kind === "app") return;
   const selected = await open(kind === "folder"
     ? { multiple: false, directory: true }
     : {
@@ -2923,6 +2964,223 @@ async function removeSchedule(): Promise<void> {
   } catch (error) {
     shortcuts = previous;
     showToast(errorMessage(error), true);
+  }
+}
+
+function installedCandidateIdentity(candidate: InstalledAppCandidate): string | null {
+  if (!candidate.kind || !candidate.target) return null;
+  return `${candidate.kind}:${candidate.target.trim().toLowerCase()}`;
+}
+
+function existingShortcutIdentities(): Set<string> {
+  return new Set(shortcuts.map((shortcut) =>
+    `${shortcutKind(shortcut)}:${shortcut.target.trim().toLowerCase()}`));
+}
+
+function visibleInstalledAppCandidates(): InstalledAppCandidate[] {
+  const query = installedAppsSearchInput.value.trim().toLocaleLowerCase("zh-CN");
+  if (!query) return installedAppCandidates;
+  return installedAppCandidates.filter((candidate) =>
+    [candidate.name, candidate.publisher ?? "", candidate.version ?? ""]
+      .some((value) => value.toLocaleLowerCase("zh-CN").includes(query)));
+}
+
+function renderInstalledApps(): void {
+  if (installedAppsLoading) {
+    const loading = document.createElement("div");
+    loading.className = "installed-apps-loading";
+    loading.textContent = "正在整理本机应用…";
+    installedAppsList.replaceChildren(loading);
+    installedAppsList.setAttribute("aria-busy", "true");
+    installedAppsResultCount.textContent = "正在读取…";
+    installedAppsSelection.textContent = "尚未选择";
+    installedAppsSelectAll.disabled = true;
+    installedAppsClear.disabled = true;
+    installedAppsImport.disabled = true;
+    return;
+  }
+
+  installedAppsList.setAttribute("aria-busy", "false");
+  if (installedAppsLoadError) {
+    const empty = document.createElement("div");
+    empty.className = "installed-apps-empty";
+    empty.textContent = "暂时无法读取本机应用。";
+    installedAppsList.replaceChildren(empty);
+    installedAppsResultCount.textContent = "读取未完成";
+    installedAppsStatus.textContent = installedAppsLoadError;
+    installedAppsSelection.textContent = "尚未选择";
+    installedAppsSelectAll.disabled = true;
+    installedAppsClear.disabled = true;
+    installedAppsImport.disabled = true;
+    return;
+  }
+  const previousScrollTop = installedAppsList.scrollTop;
+  const existing = existingShortcutIdentities();
+  const visible = visibleInstalledAppCandidates();
+  installedAppsResultCount.textContent = `${visible.length} 个应用`;
+
+  if (!visible.length) {
+    const empty = document.createElement("div");
+    empty.className = "installed-apps-empty";
+    empty.textContent = installedAppCandidates.length ? "没有找到相符的应用。" : "没有读取到可显示的应用。";
+    installedAppsList.replaceChildren(empty);
+  } else {
+    const fragment = document.createDocumentFragment();
+    for (const candidate of visible) {
+      const identity = installedCandidateIdentity(candidate);
+      const alreadyAdded = identity ? existing.has(identity) : false;
+      const selectable = Boolean(identity) && !alreadyAdded;
+      const row = document.createElement("label");
+      row.className = "installed-app-row";
+      if (!selectable) row.classList.add("is-unavailable");
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedInstalledAppIds.has(candidate.id);
+      checkbox.disabled = !selectable || installedAppsImporting;
+      checkbox.setAttribute("aria-label", `选择 ${candidate.name}`);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          const remaining = Math.max(0, MAX_SHORTCUTS - shortcuts.length);
+          if (selectedInstalledAppIds.size >= remaining) {
+            checkbox.checked = false;
+            installedAppsStatus.textContent = `常用入口最多可保存 ${MAX_SHORTCUTS} 个。`;
+            return;
+          }
+          selectedInstalledAppIds.add(candidate.id);
+        } else {
+          selectedInstalledAppIds.delete(candidate.id);
+        }
+        installedAppsStatus.textContent = "";
+        renderInstalledApps();
+      });
+
+      const iconHolder = document.createElement("span");
+      iconHolder.className = "installed-app-row-icon";
+      iconHolder.append(icon("app"));
+
+      const copy = document.createElement("span");
+      copy.className = "installed-app-row-copy";
+      const name = document.createElement("strong");
+      name.textContent = candidate.name;
+      const details = document.createElement("small");
+      const source = candidate.source === "store" ? "Microsoft Store" : "桌面应用";
+      details.textContent = [candidate.publisher, candidate.version, source].filter(Boolean).join(" · ");
+      copy.append(name, details);
+
+      const state = document.createElement("span");
+      state.className = "installed-app-row-state";
+      state.textContent = alreadyAdded ? "已加入" : identity ? "" : "暂无启动入口";
+      row.append(checkbox, iconHolder, copy, state);
+      fragment.append(row);
+    }
+    installedAppsList.replaceChildren(fragment);
+  }
+
+  const selectableVisible = visible.filter((candidate) => {
+    const identity = installedCandidateIdentity(candidate);
+    return identity && !existing.has(identity);
+  });
+  const unavailable = installedAppCandidates.filter((candidate) => !installedCandidateIdentity(candidate)).length;
+  installedAppsStatus.textContent = unavailable
+    ? `${unavailable} 个系统记录未提供可靠的启动入口，暂不支持导入。`
+    : "";
+  installedAppsSelection.textContent = selectedInstalledAppIds.size
+    ? `已选择 ${selectedInstalledAppIds.size} 个`
+    : "尚未选择";
+  installedAppsSelectAll.disabled = installedAppsImporting
+    || selectableVisible.every((candidate) => selectedInstalledAppIds.has(candidate.id));
+  installedAppsClear.disabled = installedAppsImporting || selectedInstalledAppIds.size === 0;
+  installedAppsImport.disabled = installedAppsImporting || selectedInstalledAppIds.size === 0;
+  installedAppsImport.textContent = installedAppsImporting ? "正在导入…" : "导入睡眠区";
+  installedAppsList.scrollTop = previousScrollTop;
+}
+
+async function openInstalledAppsDialog(): Promise<void> {
+  closeSettings();
+  selectedInstalledAppIds.clear();
+  installedAppCandidates = [];
+  installedAppsSearchInput.value = "";
+  installedAppsStatus.textContent = "";
+  installedAppsLoadError = "";
+  installedAppsLoading = true;
+  installedAppsDialog.showModal();
+  renderInstalledApps();
+  try {
+    installedAppCandidates = await invoke<InstalledAppCandidate[]>("list_installed_apps");
+  } catch (error) {
+    installedAppsLoadError = errorMessage(error);
+  } finally {
+    installedAppsLoading = false;
+    renderInstalledApps();
+    window.setTimeout(() => installedAppsSearchInput.focus(), 0);
+  }
+}
+
+function closeInstalledAppsDialog(): void {
+  if (installedAppsImporting) return;
+  installedAppsDialog.close();
+  installedAppsSettingButton.focus();
+}
+
+function selectAllVisibleInstalledApps(): void {
+  const existing = existingShortcutIdentities();
+  let availableSlots = Math.max(0, MAX_SHORTCUTS - shortcuts.length - selectedInstalledAppIds.size);
+  for (const candidate of visibleInstalledAppCandidates()) {
+    const identity = installedCandidateIdentity(candidate);
+    if (!identity || existing.has(identity) || selectedInstalledAppIds.has(candidate.id)) continue;
+    if (availableSlots <= 0) break;
+    selectedInstalledAppIds.add(candidate.id);
+    availableSlots -= 1;
+  }
+  if (availableSlots === 0 && MAX_SHORTCUTS - shortcuts.length > 0) {
+    renderInstalledApps();
+    installedAppsStatus.textContent = `已达到 ${MAX_SHORTCUTS} 个入口的上限。`;
+    return;
+  }
+  renderInstalledApps();
+}
+
+async function importSelectedInstalledApps(): Promise<void> {
+  if (installedAppsImporting || !selectedInstalledAppIds.size) return;
+  const existing = existingShortcutIdentities();
+  const selected = installedAppCandidates.filter((candidate) => {
+    const identity = installedCandidateIdentity(candidate);
+    return selectedInstalledAppIds.has(candidate.id) && identity && !existing.has(identity);
+  });
+  const remaining = Math.max(0, MAX_SHORTCUTS - shortcuts.length);
+  if (!selected.length || remaining === 0) {
+    installedAppsStatus.textContent = remaining === 0
+      ? `常用入口最多可保存 ${MAX_SHORTCUTS} 个。`
+      : "所选应用已经加入常用入口。";
+    return;
+  }
+
+  const additions: AppShortcut[] = selected.slice(0, remaining).map((candidate) => ({
+    id: crypto.randomUUID(),
+    name: candidate.name,
+    target: candidate.target!,
+    icon: inferIcon(candidate.name, candidate.target!, candidate.kind!),
+    kind: candidate.kind!,
+    sleeping: true,
+  }));
+  const previous = shortcuts;
+  installedAppsImporting = true;
+  renderInstalledApps();
+  shortcuts = [...shortcuts, ...additions];
+  try {
+    await persist();
+    sleepExpanded = true;
+    installedAppsImporting = false;
+    installedAppsDialog.close();
+    render();
+    void hydrateAppIcons(additions);
+    showToast(`已将 ${additions.length} 个应用放入睡眠区`);
+  } catch (error) {
+    shortcuts = previous;
+    installedAppsImporting = false;
+    installedAppsStatus.textContent = errorMessage(error);
+    renderInstalledApps();
   }
 }
 
@@ -3594,6 +3852,20 @@ backupDialog.addEventListener("cancel", (event) => { if (restoringBackup) event.
 element<HTMLButtonElement>("backup-export").addEventListener("click", () => void exportWorkspaceBackup());
 element<HTMLButtonElement>("backup-import").addEventListener("click", () => void selectWorkspaceBackup());
 element<HTMLButtonElement>("backup-restore").addEventListener("click", () => void restoreWorkspaceBackup());
+installedAppsSettingButton.addEventListener("click", () => void openInstalledAppsDialog());
+element<HTMLButtonElement>("installed-apps-close").addEventListener("click", closeInstalledAppsDialog);
+element<HTMLButtonElement>("installed-apps-cancel").addEventListener("click", closeInstalledAppsDialog);
+installedAppsDialog.addEventListener("cancel", (event) => {
+  if (installedAppsImporting) event.preventDefault();
+});
+installedAppsSearchInput.addEventListener("input", renderInstalledApps);
+installedAppsSelectAll.addEventListener("click", selectAllVisibleInstalledApps);
+installedAppsClear.addEventListener("click", () => {
+  selectedInstalledAppIds.clear();
+  installedAppsStatus.textContent = "";
+  renderInstalledApps();
+});
+installedAppsImport.addEventListener("click", () => void importSelectedInstalledApps());
 element<HTMLButtonElement>("check-update-button").addEventListener("click", () => void checkForUpdates(true));
 shortcutsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("shortcuts"));
 checklistsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("checklists"));

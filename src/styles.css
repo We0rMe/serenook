@@ -2193,6 +2193,10 @@ body.is-reordering * {
   border: 0;
 }
 
+.shortcut-kind-selector.is-installed {
+  grid-template-columns: 1fr;
+}
+
 .shortcut-kind-selector legend {
   margin-bottom: 7px;
   color: var(--muted);
@@ -2254,6 +2258,199 @@ body.is-reordering * {
 .shortcut-dialog input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.installed-apps-dialog {
+  width: min(680px, calc(100% - 48px));
+  max-height: min(720px, calc(100vh - 64px));
+  padding: 26px;
+}
+
+.installed-apps-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.installed-apps-heading {
+  margin-bottom: 8px;
+}
+
+.installed-apps-intro {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.installed-apps-search {
+  position: relative;
+}
+
+.installed-apps-search > span,
+.installed-apps-search > span svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  z-index: 1;
+  width: 15px;
+  height: 15px;
+  color: var(--faint);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.shortcut-dialog .installed-apps-search input {
+  padding-left: 36px;
+}
+
+.installed-apps-toolbar {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.installed-apps-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.installed-apps-list {
+  min-height: 220px;
+  flex: 1;
+  overflow-y: auto;
+  border-block: 1px solid var(--border);
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.installed-apps-loading,
+.installed-apps-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
+  font-size: 13px;
+}
+
+.shortcut-dialog .installed-app-row {
+  min-height: 58px;
+  margin: 0;
+  padding: 8px 7px;
+  display: grid;
+  grid-template-columns: 20px 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  color: var(--text);
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 140ms ease, opacity 140ms ease;
+}
+
+.shortcut-dialog .installed-app-row:last-child {
+  border-bottom: 0;
+}
+
+.shortcut-dialog .installed-app-row:hover {
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.shortcut-dialog .installed-app-row.is-unavailable {
+  opacity: 0.52;
+  cursor: default;
+}
+
+.shortcut-dialog .installed-app-row input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.shortcut-dialog .installed-app-row input:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: linear-gradient(135deg, transparent 45%, #fff 45% 56%, transparent 56%),
+    linear-gradient(45deg, transparent 42%, #fff 42% 53%, transparent 53%);
+  background-position: 6px 0, 1px 5px;
+  background-size: 8px 13px, 8px 8px;
+  background-repeat: no-repeat;
+}
+
+.shortcut-dialog .installed-app-row input:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.installed-app-row-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.installed-app-row-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.installed-app-row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.installed-app-row-copy strong,
+.installed-app-row-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.installed-app-row-copy strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.installed-app-row-copy small {
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.installed-app-row-state {
+  color: var(--faint);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.installed-apps-status {
+  min-height: 16px;
+}
+
+.installed-apps-actions {
+  margin-top: 12px;
+}
+
+#installed-apps-selection {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .diary-dialog {
@@ -3233,6 +3430,19 @@ body.is-reordering * {
 
   .diary-reader-heading {
     padding-inline: 24px;
+  }
+
+  .installed-apps-dialog {
+    width: calc(100% - 28px);
+    padding: 22px 18px;
+  }
+
+  .shortcut-dialog .installed-app-row {
+    grid-template-columns: 18px 31px minmax(0, 1fr);
+  }
+
+  .installed-app-row-state {
+    display: none;
   }
 }
 
