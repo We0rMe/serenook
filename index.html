@@ -179,6 +179,18 @@
               </div>
             </div>
           </section>
+          <section id="music-module" class="workspace-module" data-module-id="music" aria-labelledby="music-module-title">
+            <header class="workspace-module-heading">
+              <button class="module-drag-handle reorder-handle" type="button" data-module-id="music" aria-label="拖动此刻在听工作区排序" title="拖动排序"><span data-icon="grip" aria-hidden="true"></span></button>
+              <button id="music-module-toggle" class="workspace-module-toggle" type="button" aria-expanded="true" aria-controls="music-module-content">
+                <strong id="music-module-title" class="workspace-module-title">此刻在听</strong>
+                <span class="workspace-module-chevron" data-icon="chevron" aria-hidden="true"></span>
+              </button>
+            </header>
+            <div id="music-module-content" class="workspace-module-content is-open" aria-hidden="false">
+              <div class="workspace-module-content-inner"><div id="music-card" class="music-card"></div></div>
+            </div>
+          </section>
         </section>
 
         <footer class="footer-note">
@@ -416,13 +428,21 @@
             <article class="guide-block">
               <span class="guide-number">06</span>
               <div>
+                <h3>此刻在听</h3>
+                <p>跟随正在播放的音乐，让封面与歌词安静流动。点击右上角刷新，可重新识别曲目并匹配歌词；进度条支持的操作随播放器而定。</p>
+              </div>
+            </article>
+
+            <article class="guide-block">
+              <span class="guide-number">07</span>
+              <div>
                 <h3>日子各有回声</h3>
                 <p>问候会随星期、时段与节日而变，右下角的日签每日更替。明暗、纪念日与随电脑启动，也都可以按习惯调整。</p>
               </div>
             </article>
 
             <article class="guide-block">
-              <span class="guide-number">07</span>
+              <span class="guide-number">08</span>
               <div>
                 <h3>妥善保存</h3>
                 <p>移除后可短暂撤销。设置中的“备份与恢复”支持导出和恢复记录，并保留最近 7 份本地备份。恢复前会另存当前记录。</p>

@@ -152,6 +152,13 @@ impl WorkspaceBackup {
         {
             order.push("scratchpad".into());
         }
+        if order.len() == 4
+            && ["shortcuts", "checklists", "diaries", "scratchpad"]
+                .iter()
+                .all(|id| order.iter().any(|item| item == id))
+        {
+            order.push("music".into());
+        }
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -574,7 +581,7 @@ mod tests {
         let backup = read_backup(&source).unwrap();
         assert_eq!(
             backup.settings.workspace_order,
-            vec!["diaries", "shortcuts", "checklists", "scratchpad"]
+            vec!["diaries", "shortcuts", "checklists", "scratchpad", "music"]
         );
         assert!(backup.summary(&source).scratchpad_characters.is_none());
         fs::write(
@@ -599,6 +606,29 @@ mod tests {
                 .content,
             page.content
         );
+    }
+
+    #[test]
+    fn music_migration_keeps_v13_order_and_rejects_duplicate_modules() {
+        let directory = TestDirectory::new();
+        let mut backup = read_workspace(&directory.0).unwrap();
+        backup.settings.workspace_order = vec![
+            "scratchpad".into(),
+            "diaries".into(),
+            "shortcuts".into(),
+            "checklists".into(),
+        ];
+        backup.settings.collapsed_modules = vec!["diaries".into()];
+        backup.migrate();
+        assert_eq!(
+            backup.settings.workspace_order,
+            vec!["scratchpad", "diaries", "shortcuts", "checklists", "music"]
+        );
+        assert_eq!(backup.settings.collapsed_modules, vec!["diaries"]);
+        assert!(backup.validate().is_ok());
+        backup.settings.workspace_order = vec!["shortcuts".into(); 4];
+        backup.migrate();
+        assert!(backup.validate().is_err());
     }
 
     #[test]

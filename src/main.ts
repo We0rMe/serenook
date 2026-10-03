@@ -9,13 +9,14 @@ import { holidayForDate, holidayGreeting } from "./holiday-greetings";
 import { ScratchpadEditor } from "./scratchpad";
 import { ScratchpadTaskComposer, taskDestinationError } from "./scratchpad-task";
 import { locateText, textExcerpt } from "./text-location";
+import { MusicCompanion } from "./music";
 import "./styles.css";
 import "./workspace.css";
 
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet" | "pdf" | "presentation";
 type ShortcutKind = "local" | "web" | "folder" | "app";
 type ThemePreference = "system" | "light" | "dark";
-type WorkspaceModuleId = "shortcuts" | "checklists" | "diaries" | "scratchpad";
+type WorkspaceModuleId = "shortcuts" | "checklists" | "diaries" | "scratchpad" | "music";
 
 interface AppShortcut {
   id: string;
@@ -98,7 +99,7 @@ const MAX_DIARY_TITLE_LENGTH = 80;
 const MAX_DIARY_CONTENT_LENGTH = 5_000;
 const DIARY_READER_CLOSE_DELAY_MS = 440;
 const DIARY_READER_SETTLE_DELAY_MS = 500;
-const WORKSPACE_MODULE_IDS: WorkspaceModuleId[] = ["shortcuts", "checklists", "diaries", "scratchpad"];
+const WORKSPACE_MODULE_IDS: WorkspaceModuleId[] = ["shortcuts", "checklists", "diaries", "scratchpad", "music"];
 const LAUNCH_INTERVAL_MS = 650;
 const RUNNING_POLL_INTERVAL_MS = 10_000;
 const MILLISECONDS_PER_DAY = 86_400_000;
@@ -1018,11 +1019,11 @@ function workspaceModuleElements(moduleId: WorkspaceModuleId): {
   if (moduleId === "checklists") {
     return { module: checklistsModule, toggle: checklistsModuleToggle, content: checklistsModuleContent };
   }
-  if (moduleId === "scratchpad") {
+  if (moduleId === "scratchpad" || moduleId === "music") {
     return {
-      module: element<HTMLElement>("scratchpad-module"),
-      toggle: element<HTMLButtonElement>("scratchpad-module-toggle"),
-      content: element<HTMLElement>("scratchpad-module-content"),
+      module: element<HTMLElement>(`${moduleId}-module`),
+      toggle: element<HTMLButtonElement>(`${moduleId}-module-toggle`),
+      content: element<HTMLElement>(`${moduleId}-module-content`),
     };
   }
   return { module: diariesModule, toggle: diariesModuleToggle, content: diariesModuleContent };
@@ -3779,6 +3780,7 @@ async function initialize(): Promise<void> {
   else showToast(errorMessage(diariesResult.reason), true);
   await loadDiaryDrafts().catch((error) => showToast(errorMessage(error), true));
   await scratchpadEditor.initialize();
+  new MusicCompanion(element<HTMLElement>("music-card"), () => !settings.collapsedModules.includes("music"));
 
   const checklistsBeforeReset = checklists;
   const checklistResetNeeded = applyDailyChecklistResets();
@@ -3871,6 +3873,7 @@ shortcutsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule
 checklistsModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("checklists"));
 diariesModuleToggle.addEventListener("click", () => void toggleWorkspaceModule("diaries"));
 element<HTMLButtonElement>("scratchpad-module-toggle").addEventListener("click", () => void toggleWorkspaceModule("scratchpad"));
+element<HTMLButtonElement>("music-module-toggle").addEventListener("click", () => void toggleWorkspaceModule("music"));
 document.querySelectorAll<HTMLButtonElement>(".module-drag-handle").forEach((handle) => {
   handle.addEventListener("pointerdown", beginModuleDrag);
 });

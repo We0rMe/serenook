@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod media;
+mod media_cloud;
+mod music_lyrics;
 mod storage;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -60,7 +63,7 @@ const MAX_DIARY_TITLE_CHARACTERS: usize = 80;
 const MAX_DIARY_CONTENT_CHARACTERS: usize = 5_000;
 const MAX_ANNIVERSARY_NAME_CHARACTERS: usize = 7;
 const DEFAULT_ANNIVERSARY_NAME: &str = "Love";
-const WORKSPACE_MODULES: [&str; 4] = ["shortcuts", "checklists", "diaries", "scratchpad"];
+const WORKSPACE_MODULES: [&str; 5] = ["shortcuts", "checklists", "diaries", "scratchpad", "music"];
 const ALLOWED_EXTENSIONS: &[&str] = &[
     "exe", "lnk", "bat", "cmd", "url", "txt", "md", "rtf", "pdf", "xps", "doc", "docx", "docm",
     "odt", "wps", "csv", "xls", "xlsx", "xlsm", "ods", "et", "ppt", "pptx", "pptm", "odp", "dps",
@@ -1677,6 +1680,11 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            media::media_snapshot,
+            media::media_control,
+            media::media_seek,
+            music_lyrics::music_lyrics,
+            music_lyrics::music_import_lyrics,
             load_apps,
             save_apps,
             load_checklists,
@@ -1967,6 +1975,7 @@ mod tests {
             "checklists".into(),
             "shortcuts".into(),
             "scratchpad".into(),
+            "music".into(),
         ];
         settings.collapsed_modules = vec!["shortcuts".into()];
         assert!(validate_settings(&settings).is_ok());
@@ -1982,7 +1991,7 @@ mod tests {
         normalize_workspace_preferences(&mut settings);
         assert_eq!(
             settings.workspace_order,
-            vec!["checklists", "shortcuts", "diaries", "scratchpad"]
+            vec!["checklists", "shortcuts", "diaries", "scratchpad", "music"]
         );
         assert!(validate_settings(&settings).is_ok());
     }
