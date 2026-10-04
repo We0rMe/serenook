@@ -48,6 +48,7 @@ const state = { sources: [{id:'1',appId:'QQMusic.exe'}, {id:'2',appId:'Spotify.e
   assert.equal(music.buttons.get('repeat').hidden, true);
   assert.equal(music.buttons.get('toggle').disabled, false);
   assert.equal(elements.get('.music-state').textContent, 'QQ 音乐');
+  assert.equal(root.classList.contains('is-idle'), false, 'connected sources restore the full player');
   assert.ok(!root.innerHTML.includes('music-options') && !root.innerHTML.includes('music-lyric-credit'));
   const oldRefresh = music.refresh(); const oldRequest = pending.shift();
   music.select.value = '2'; music.select.handlers.change();
@@ -62,6 +63,8 @@ const state = { sources: [{id:'1',appId:'QQMusic.exe'}, {id:'2',appId:'Spotify.e
   command.reject('Player stopped'); await flush();
   pending.shift().resolve({...state,selected:null,sources:[]}); await action;
   assert.equal(music.controls.hidden, true);
+  assert.equal(root.classList.contains('is-idle'), true, 'exited sources use the compact empty state');
+  assert.equal(music.artist.textContent, '', 'empty state must not repeat its guidance below the title');
   assert.equal(music.select.value, '2', 'an exited pinned player must not silently fall back');
   assert.equal(music.status.textContent, 'Player stopped');
   music.snapshot = state;

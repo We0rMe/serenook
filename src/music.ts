@@ -82,12 +82,13 @@ export class MusicCompanion {
   private reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   constructor(private root: HTMLElement, private active: () => boolean) {
+    root.classList.add("is-idle");
     root.innerHTML = `<div class="music-atmosphere" aria-hidden="true"></div>
       <div class="music-source-row"><span class="music-state"></span><select aria-label="播放来源"><option value="">自动跟随</option></select>
       <button type="button" class="music-button music-refresh" aria-label="重新匹配歌词" title="重新匹配歌词">${svg("refresh")}</button></div>
       <div class="music-main"><div class="music-info"><div class="music-cover">${svg("note")}<img alt="当前歌曲封面" hidden /></div>
-      <h3 class="music-title">让音乐在这里停留</h3><p class="music-artist">打开音乐应用，播放你喜欢的一首。</p></div>
-      <div class="music-words"><div class="music-lyrics" tabindex="0" aria-label="歌词"><p class="music-lyric-empty">留一点空间，给此刻的声音。</p></div></div></div>
+      <h3 class="music-title">打开音乐应用，播放一首歌。</h3><p class="music-artist"></p></div>
+      <div class="music-words"><div class="music-lyrics" tabindex="0" aria-label="歌词"></div></div></div>
       <div class="music-footer"><div class="music-timeline"><div class="music-rail"><div class="music-water" aria-hidden="true"><div class="music-water-fill"><i></i><i></i></div></div><input type="range" min="0" max="100" value="0" step="1" aria-label="播放进度" disabled /></div><div class="music-times"><span class="music-elapsed">—:—</span><span class="music-duration">—:—</span></div></div>
       <div class="music-controls" hidden></div></div><p class="music-status" role="status" aria-live="polite"></p>`;
     this.select = root.querySelector("select")!;
@@ -121,9 +122,10 @@ export class MusicCompanion {
     }
     this.select.addEventListener("change", () => {
       this.preferred = this.select.value || null;
+      this.root.classList.add("is-idle");
       this.generation++; this.snapshot = null; this.controls.hidden = true;
       this.position = null; this.progress.disabled = true;
-      this.lyricGeneration++; this.track = ""; this.showLyricMessage("正在连接…"); this.activity();
+      this.lyricGeneration++; this.track = ""; this.showLyricMessage(""); this.activity();
       this.title.textContent = "正在连接…"; this.artist.textContent = "";
       this.cover.hidden = true; this.status.textContent = "";
       void this.refresh();
@@ -161,8 +163,9 @@ export class MusicCompanion {
       if (generation !== this.generation) return;
       this.snapshot = null; this.controls.hidden = true; this.cover.hidden = true;
       this.position = null; this.progress.disabled = true;
-      this.lyricGeneration++; this.track = ""; this.showLyricMessage("等待播放器连接"); this.activity();
-      this.title.textContent = "暂未连接到播放器"; this.artist.textContent = "稍后会自动重试。";
+      this.root.classList.add("is-idle");
+      this.lyricGeneration++; this.track = ""; this.showLyricMessage(""); this.activity();
+      this.title.textContent = "连接暂不可用，稍后自动重试。"; this.artist.textContent = "";
       this.status.textContent = String(error);
       this.root.querySelector(".music-state")!.textContent = "";
       this.finishRematch();
@@ -173,6 +176,7 @@ export class MusicCompanion {
   }
 
   private render(s: MediaSnapshot): void {
+    this.root.classList.toggle("is-idle", !s.selected);
     if (Date.now() >= this.noticeUntil) this.status.textContent = "";
     const sources = [{ id: "", appId: "自动跟随" }, ...s.sources];
     if (this.preferred && !s.sources.some(source => source.id === this.preferred))
@@ -184,9 +188,9 @@ export class MusicCompanion {
     }
     this.select.value = this.preferred ?? "";
     this.select.hidden = !s.sources.length && !this.preferred;
-    this.title.textContent = s.selected ? (s.title || "正在播放的媒体") : this.preferred ? "等待所选播放器" : "让音乐在这里停留";
+    this.title.textContent = s.selected ? (s.title || "正在播放的媒体") : this.preferred ? "打开所选播放器，或切换为自动跟随。" : "打开音乐应用，播放一首歌。";
     this.title.title = this.title.textContent;
-    this.artist.textContent = s.selected ? s.artist || "" : this.preferred ? "也可以切换为自动跟随。" : "打开音乐应用，播放你喜欢的一首。";
+    this.artist.textContent = s.selected ? s.artist || "" : "";
     this.artist.title = [s.artist, s.album].filter(Boolean).join(" · ");
     const source = s.sources.find(source => source.id === s.selected);
     this.root.querySelector(".music-state")!.textContent = source
@@ -253,7 +257,7 @@ export class MusicCompanion {
     const generation = ++this.lyricGeneration;
     this.retryAt = 0;
     const current = this.snapshot;
-    if (!current?.selected || !current.title) { this.showLyricMessage("留一点空间，给此刻的声音。"); this.finishRematch(); return; }
+    if (!current?.selected || !current.title) { this.showLyricMessage(""); this.finishRematch(); return; }
     const key = this.track, cacheKey = this.cacheKey();
     const cached = force ? undefined : this.lyrics.get(cacheKey) ?? this.lyrics.get(key);
     if (cached) { this.displayLyrics(cached.data); this.finishRematch(); return; }

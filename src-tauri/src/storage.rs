@@ -574,11 +574,16 @@ mod tests {
         let directory = TestDirectory::new();
         let mut old = serde_json::to_value(read_workspace(&directory.0).unwrap()).unwrap();
         old.as_object_mut().unwrap().remove("scratchpad");
+        old["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("hiddenModules");
         old["settings"]["workspaceOrder"] =
             serde_json::json!(["diaries", "shortcuts", "checklists"]);
         let source = directory.0.join("legacy.json");
         fs::write(&source, json_bytes(&old).unwrap()).unwrap();
         let backup = read_backup(&source).unwrap();
+        assert!(backup.settings.hidden_modules.is_empty());
         assert_eq!(
             backup.settings.workspace_order,
             vec!["diaries", "shortcuts", "checklists", "scratchpad", "music"]
@@ -816,6 +821,8 @@ mod tests {
         let directory = TestDirectory::new();
         let mut backup = read_workspace(&directory.0).unwrap();
         backup.settings.anniversary_name = "Dog".into();
+        backup.settings.hidden_modules = vec!["music".into(), "diaries".into()];
+        backup.settings.collapsed_modules = vec!["diaries".into()];
         backup.drafts.push(DiaryDraft {
             entry_id: None,
             title: "此刻".into(),
@@ -826,8 +833,11 @@ mod tests {
         let restored = read_workspace(&directory.0).unwrap();
         assert_eq!(restored.drafts.len(), 1);
         assert_eq!(restored.settings.anniversary_name, "Dog");
+        assert_eq!(restored.settings.hidden_modules, vec!["music", "diaries"]);
+        assert_eq!(restored.settings.collapsed_modules, vec!["diaries"]);
         let old = read_backup(&backup_paths(&directory.0).unwrap()[0]).unwrap();
         assert_eq!(old.settings.anniversary_name, "Love");
+        assert!(old.settings.hidden_modules.is_empty());
     }
 
     #[test]

@@ -46,6 +46,7 @@ interface AppSettings {
   anniversaryName: string;
   workspaceOrder: WorkspaceModuleId[];
   collapsedModules: WorkspaceModuleId[];
+  hiddenModules: WorkspaceModuleId[];
 }
 
 interface ChecklistTask {
@@ -242,6 +243,9 @@ const settingsButton = element<HTMLButtonElement>("settings-button");
 const settingsCloseButton = element<HTMLButtonElement>("settings-close-button");
 const settingsBackdrop = element<HTMLElement>("settings-backdrop");
 const settingsPanel = element<HTMLElement>("settings-panel");
+const workspaceSettingButton = element<HTMLButtonElement>("workspace-setting-button");
+const workspaceEditor = element<HTMLElement>("workspace-editor");
+const workspaceVisibilityButtons = [...workspaceEditor.querySelectorAll<HTMLButtonElement>("[data-workspace-visibility]")];
 const dailyQuoteText = element<HTMLElement>("daily-quote");
 const anniversarySettingButton = element<HTMLButtonElement>("anniversary-setting-button");
 const anniversaryEditor = element<HTMLElement>("anniversary-editor");
@@ -320,7 +324,10 @@ let settings: AppSettings = {
   anniversaryName: DEFAULT_ANNIVERSARY_NAME,
   workspaceOrder: [...WORKSPACE_MODULE_IDS],
   collapsedModules: [],
+  hiddenModules: [],
 };
+let settingsSaveQueue: Promise<void> = Promise.resolve();
+let workspacePreferencesSaving = false;
 const appIcons = new Map<string, string | null>();
 const runningTargets = new Set<string>();
 let editing = false;
@@ -545,7 +552,7 @@ function beginLiveReorder(
 
 function animateReorderShift(state: LiveReorderState, move: () => void): void {
   const items = [...state.container.querySelectorAll<HTMLElement>(state.itemSelector)]
-    .filter((item) => item !== state.source);
+    .filter((item) => item !== state.source && !item.hidden);
   items.forEach((item) => item.getAnimations().forEach((animation) => animation.cancel()));
   const before = new Map(items.map((item) => [item, item.getBoundingClientRect()]));
   move();
@@ -581,7 +588,7 @@ function closestReorderTarget(state: LiveReorderState, clientX: number, clientY:
   if (direct && direct !== state.source && direct.parentElement === state.container) return direct;
 
   const candidates = [...state.container.querySelectorAll<HTMLElement>(state.itemSelector)]
-    .filter((item) => item !== state.source);
+    .filter((item) => item !== state.source && !item.hidden);
   let nearest: HTMLElement | null = null;
   let nearestDistance = Number.POSITIVE_INFINITY;
   for (const candidate of candidates) {
@@ -1003,9 +1010,24 @@ function normalizeWorkspaceOrder(value: unknown): WorkspaceModuleId[] {
   return [...order, ...WORKSPACE_MODULE_IDS.filter((module) => !order.includes(module))];
 }
 
-function normalizeCollapsedModules(value: unknown): WorkspaceModuleId[] {
+function normalizeModuleSelection(value: unknown): WorkspaceModuleId[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter(isWorkspaceModuleId))];
+}
+
+// Merge each change with the last successful save, not a stale settings snapshot.
+function saveSettingsPatch(patch: Partial<AppSettings>): Promise<void> {
+  const save = settingsSaveQueue.then(async () => {
+    const next = { ...settings, ...patch };
+    await invoke("save_settings", { settings: next });
+    settings = next;
+  });
+  settingsSaveQueue = save.catch(() => {});
+  return save;
+}
+
+function isWorkspaceModuleActive(moduleId: WorkspaceModuleId, preferences = settings): boolean {
+  return !preferences.hiddenModules.includes(moduleId) && !preferences.collapsedModules.includes(moduleId);
 }
 
 function workspaceModuleElements(moduleId: WorkspaceModuleId): {
@@ -1040,36 +1062,72 @@ function applyWorkspaceOrder(): void {
 function renderWorkspaceModules(): void {
   for (const moduleId of WORKSPACE_MODULE_IDS) {
     const { module, toggle, content } = workspaceModuleElements(moduleId);
-    const expanded = !settings.collapsedModules.includes(moduleId);
+    const expanded = isWorkspaceModuleActive(moduleId);
+    module.hidden = settings.hiddenModules.includes(moduleId);
+    module.inert = module.hidden;
     module.classList.toggle("is-collapsed", !expanded);
+    toggle.setAttribute("aria-disabled", String(workspacePreferencesSaving));
     toggle.setAttribute("aria-expanded", String(expanded));
+    const handle = module.querySelector<HTMLButtonElement>(".module-drag-handle");
+    if (handle) handle.setAttribute("aria-disabled", String(workspacePreferencesSaving));
     content.classList.toggle("is-open", expanded);
     content.setAttribute("aria-hidden", String(!expanded));
     content.inert = !expanded;
   }
+  workspaceSections.hidden = WORKSPACE_MODULE_IDS.every((id) => settings.hiddenModules.includes(id));
+  for (const button of workspaceVisibilityButtons) {
+    const moduleId = button.dataset.workspaceVisibility as WorkspaceModuleId;
+    button.setAttribute("aria-pressed", String(!settings.hiddenModules.includes(moduleId)));
+    button.setAttribute("aria-disabled", String(workspacePreferencesSaving));
+  }
+}
+
+async function changeWorkspacePreferences(
+  patch: Pick<Partial<AppSettings>, "hiddenModules" | "collapsedModules" | "workspaceOrder">,
+): Promise<boolean> {
+  if (workspacePreferencesSaving || moduleDragState) return false;
+  workspacePreferencesSaving = true;
+  const scratchpadWasActive = isWorkspaceModuleActive("scratchpad");
+  renderWorkspaceModules();
+  try {
+    if (scratchpadWasActive && !isWorkspaceModuleActive("scratchpad", { ...settings, ...patch })) {
+      await scratchpadEditor.flush();
+    }
+    await saveSettingsPatch(patch);
+    if (!scratchpadWasActive && isWorkspaceModuleActive("scratchpad")) {
+      requestAnimationFrame(() => scratchpadEditor.restoreView());
+    }
+    return true;
+  } catch (error) {
+    showToast(errorMessage(error), true);
+    return false;
+  } finally {
+    workspacePreferencesSaving = false;
+    applyWorkspaceOrder();
+    renderWorkspaceModules();
+  }
 }
 
 async function toggleWorkspaceModule(moduleId: WorkspaceModuleId): Promise<void> {
-  if (moduleId === "scratchpad" && !settings.collapsedModules.includes(moduleId)) {
-    try { await scratchpadEditor.flush(); }
-    catch (error) { showToast(errorMessage(error), true); return; }
-  }
-  const previous = settings;
   const collapsed = new Set(settings.collapsedModules);
   if (collapsed.has(moduleId)) collapsed.delete(moduleId);
   else collapsed.add(moduleId);
-  settings = { ...settings, collapsedModules: [...collapsed] };
-  renderWorkspaceModules();
-  try {
-    await invoke("save_settings", { settings });
-    if (moduleId === "scratchpad" && !collapsed.has(moduleId)) {
-      requestAnimationFrame(() => scratchpadEditor.restoreView());
-    }
-  } catch (error) {
-    settings = previous;
-    renderWorkspaceModules();
-    showToast(errorMessage(error), true);
-  }
+  await changeWorkspacePreferences({ collapsedModules: [...collapsed] });
+}
+
+async function toggleWorkspaceVisibility(moduleId: WorkspaceModuleId): Promise<void> {
+  const hidden = new Set(settings.hiddenModules);
+  if (hidden.has(moduleId)) hidden.delete(moduleId);
+  else hidden.add(moduleId);
+  await changeWorkspacePreferences({ hiddenModules: [...hidden] });
+}
+
+async function revealWorkspaceModule(moduleId: WorkspaceModuleId): Promise<boolean> {
+  if (isWorkspaceModuleActive(moduleId)) return true;
+  return changeWorkspacePreferences({
+    hiddenModules: settings.hiddenModules.filter((id) => id !== moduleId),
+    collapsedModules: settings.collapsedModules.filter((id) => id !== moduleId),
+  });
 }
 
 function clearModuleDragState(): void {
@@ -1080,7 +1138,7 @@ function clearModuleDragState(): void {
 }
 
 function beginModuleDrag(event: PointerEvent): void {
-  if (event.button !== 0 || moduleDragState) return;
+  if (event.button !== 0 || moduleDragState || workspacePreferencesSaving) return;
   const handle = event.currentTarget as HTMLButtonElement;
   const moduleId = handle.dataset.moduleId as WorkspaceModuleId;
   const module = workspaceModuleElements(moduleId).module;
@@ -1114,26 +1172,25 @@ async function finishModuleDrag(event: PointerEvent): Promise<void> {
   const state = moduleDragState;
   if (!state || state.live.pointerId !== event.pointerId) return;
 
-  const workspaceOrder = [...workspaceSections.querySelectorAll<HTMLElement>(".workspace-module")]
+  const visibleOrder = [...workspaceSections.querySelectorAll<HTMLElement>(".workspace-module")]
+    .filter((module) => !module.hidden)
     .map((module) => module.dataset.moduleId)
     .filter(isWorkspaceModuleId);
   clearModuleDragState();
-  if (!hasSameIds(workspaceOrder, state.previousOrder)) {
+  const previousVisibleOrder = state.previousOrder.filter((id) => !settings.hiddenModules.includes(id));
+  if (!hasSameIds(visibleOrder, previousVisibleOrder)) {
     applyWorkspaceOrder();
     showToast("未能完成排序，请再试一次。", true);
     return;
   }
-  if (hasSameOrder(workspaceOrder, state.previousOrder)) return;
-
-  const previous = settings;
-  settings = { ...settings, workspaceOrder };
-  try {
-    await invoke("save_settings", { settings });
-  } catch (error) {
-    settings = previous;
+  if (hasSameOrder(visibleOrder, previousVisibleOrder)) {
     applyWorkspaceOrder();
-    showToast(errorMessage(error), true);
+    return;
   }
+  // Hidden modules keep their slots while visible modules exchange places.
+  let visibleIndex = 0;
+  const workspaceOrder = state.previousOrder.map((id) => settings.hiddenModules.includes(id) ? id : visibleOrder[visibleIndex++]);
+  await changeWorkspacePreferences({ workspaceOrder });
 }
 
 function cancelModuleDrag(event: PointerEvent): void {
@@ -1826,7 +1883,7 @@ function renderStoredChecklists(): void {
   if (!stored.length) {
     const empty = document.createElement("p");
     empty.className = "field-hint";
-    empty.textContent = "这里留给暂告一段落的清单。";
+    empty.textContent = "还没有收存的清单";
     content.append(empty);
   }
   for (const list of stored) {
@@ -2993,7 +3050,7 @@ function renderInstalledApps(): void {
     loading.textContent = "正在整理本机应用…";
     installedAppsList.replaceChildren(loading);
     installedAppsList.setAttribute("aria-busy", "true");
-    installedAppsResultCount.textContent = "正在读取…";
+    installedAppsResultCount.textContent = "";
     installedAppsSelection.textContent = "尚未选择";
     installedAppsSelectAll.disabled = true;
     installedAppsClear.disabled = true;
@@ -3190,7 +3247,7 @@ function openSettings(): void {
   settingsPanel.classList.add("is-open");
   settingsPanel.setAttribute("aria-hidden", "false");
   settingsButton.setAttribute("aria-expanded", "true");
-  window.setTimeout(() => anniversarySettingButton.focus(), 0);
+  window.setTimeout(() => workspaceSettingButton.focus(), 0);
 }
 
 function setSettingsEditor(button: HTMLButtonElement, editor: HTMLElement, open: boolean): void {
@@ -3205,6 +3262,7 @@ function closeSettings(): void {
   settingsPanel.setAttribute("aria-hidden", "true");
   settingsButton.setAttribute("aria-expanded", "false");
   settingsBackdrop.hidden = true;
+  setSettingsEditor(workspaceSettingButton, workspaceEditor, false);
   setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
   setSettingsEditor(bulkSettingButton, bulkEditor, false);
   setSettingsEditor(themeSettingButton, themeEditor, false);
@@ -3212,11 +3270,19 @@ function closeSettings(): void {
   settingsButton.focus();
 }
 
-function closeOtherSettingsEditors(except: "anniversary" | "bulk" | "theme" | "startup"): void {
+function closeOtherSettingsEditors(except: "workspace" | "anniversary" | "bulk" | "theme" | "startup"): void {
+  if (except !== "workspace") setSettingsEditor(workspaceSettingButton, workspaceEditor, false);
   if (except !== "anniversary") setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
   if (except !== "bulk") setSettingsEditor(bulkSettingButton, bulkEditor, false);
   if (except !== "theme") setSettingsEditor(themeSettingButton, themeEditor, false);
   if (except !== "startup") setSettingsEditor(startupSettingButton, startupEditor, false);
+}
+
+function toggleWorkspaceEditor(): void {
+  const opening = !workspaceEditor.classList.contains("is-open");
+  closeOtherSettingsEditors("workspace");
+  setSettingsEditor(workspaceSettingButton, workspaceEditor, opening);
+  if (opening) window.setTimeout(() => workspaceVisibilityButtons[0]?.focus(), 0);
 }
 
 function toggleAnniversaryEditor(): void {
@@ -3272,16 +3338,12 @@ function renderThemeSetting(): void {
 }
 
 async function toggleTheme(): Promise<void> {
-  const previous = settings;
-  settings = { ...settings, theme: effectiveTheme() === "dark" ? "light" : "dark" };
-  renderThemeSetting();
   themeToggle.disabled = true;
   try {
-    await invoke("save_settings", { settings });
+    await saveSettingsPatch({ theme: effectiveTheme() === "dark" ? "light" : "dark" });
+    renderThemeSetting();
     showToast(settings.theme === "dark" ? "已切换至深色模式" : "已切换至浅色模式");
   } catch (error) {
-    settings = previous;
-    renderThemeSetting();
     showToast(errorMessage(error), true);
   } finally {
     themeToggle.disabled = false;
@@ -3293,16 +3355,12 @@ function renderStartupSetting(): void {
 }
 
 async function toggleStartup(): Promise<void> {
-  const previous = settings;
-  settings = { ...settings, launchOnStartup: !settings.launchOnStartup };
-  renderStartupSetting();
   startupToggle.disabled = true;
   try {
-    await invoke("save_settings", { settings });
+    await saveSettingsPatch({ launchOnStartup: !settings.launchOnStartup });
+    renderStartupSetting();
     showToast(settings.launchOnStartup ? "已开启开机自启" : "已关闭开机自启");
   } catch (error) {
-    settings = previous;
-    renderStartupSetting();
     showToast(errorMessage(error), true);
   } finally {
     startupToggle.disabled = false;
@@ -3355,12 +3413,9 @@ function completeWelcome(readGuide: boolean): void {
 }
 
 async function openWelcomeOnce(): Promise<void> {
-  const previous = settings;
-  settings = { ...settings, hasCompletedWelcome: true };
   try {
-    await invoke("save_settings", { settings });
+    await saveSettingsPatch({ hasCompletedWelcome: true });
   } catch (error) {
-    settings = previous;
     showToast(errorMessage(error), true);
   }
 
@@ -3407,7 +3462,7 @@ function showAvailableUpdate(): void {
   if (!availableUpdate) return;
   updateVersion.textContent = `Serenook ${availableUpdate.version}`;
   renderUpdateNotes(availableUpdate.body?.trim() || "这一版带来了一些安静而细小的改进。");
-  updateStatus.textContent = "准备好后，即可更新。";
+  updateStatus.textContent = "";
   updateInstallButton.disabled = false;
   updateLaterButton.disabled = false;
   updateDialog.showModal();
@@ -3428,7 +3483,7 @@ function renderSearchResults(): void {
   const query = searchInput.value.normalize("NFKC").trim().toLocaleLowerCase();
   const terms = query.split(/\s+/).filter(Boolean);
   searchResults.replaceChildren();
-  if (!terms.length) { element<HTMLElement>("search-status").textContent = "输入关键词，找回放在这里的内容。"; return; }
+  if (!terms.length) { element<HTMLElement>("search-status").textContent = ""; return; }
   const matches = (text: string) => terms.every((term) => text.normalize("NFKC").toLocaleLowerCase().includes(term));
   const results: { title: string; detail: string; kind: string; action: () => void | Promise<void> }[] = [];
   for (const shortcut of shortcuts) if (matches(`${shortcut.name} ${shortcut.target}`)) results.push({
@@ -3438,7 +3493,7 @@ function renderSearchResults(): void {
   for (const list of checklists) for (const task of list.tasks) if (matches(`${list.name} ${task.content}`)) results.push({
     title: task.content, detail: `${list.name}${list.archived ? " · 已收存" : ""} · ${task.completed ? "已完成" : "未完成"}`, kind: "checklist",
     action: async () => {
-      if (settings.collapsedModules.includes("checklists")) await toggleWorkspaceModule("checklists");
+      if (!await revealWorkspaceModule("checklists")) return;
       collapsedCompleted.delete(list.id);
       editingChecklistId = null;
       openChecklistFocus(list.id);
@@ -3452,7 +3507,7 @@ function renderSearchResults(): void {
   for (const entry of orderedDiaries()) if (matches(`${entry.title} ${entry.content}`)) {
     results.push({ title: entry.title, detail: `${formatDiaryTimestamp(entry.createdAt).slice(0, 10)} · ${textExcerpt(entry.content, locateText(entry.content, terms))}`, kind: "book",
       action: async () => {
-        if (settings.collapsedModules.includes("diaries")) await toggleWorkspaceModule("diaries");
+        if (!await revealWorkspaceModule("diaries")) return;
         diaryMonth = diaryMonthKey(entry);
         renderDiaries();
         const card = diaryGrid.querySelector<HTMLElement>(`[data-diary-id="${CSS.escape(entry.id)}"]`);
@@ -3463,8 +3518,7 @@ function renderSearchResults(): void {
   if (scratchpadEditor.content && matches(scratchpadEditor.content)) results.push({
     title: "随手记", detail: textExcerpt(scratchpadEditor.content, locateText(scratchpadEditor.content, terms)), kind: "document",
     action: async () => {
-      if (settings.collapsedModules.includes("scratchpad")) await toggleWorkspaceModule("scratchpad");
-      if (settings.collapsedModules.includes("scratchpad")) return;
+      if (!await revealWorkspaceModule("scratchpad")) return;
       requestAnimationFrame(() => requestAnimationFrame(() => {
         element<HTMLElement>("scratchpad-input").scrollIntoView({ block: "center" });
         scratchpadEditor.reveal(terms);
@@ -3605,7 +3659,7 @@ async function installAvailableUpdate(): Promise<void> {
     await availableUpdate.downloadAndInstall((event) => {
       if (event.event === "Started") {
         contentLength = event.data.contentLength ?? 0;
-        updateStatus.textContent = "正在安静地准备更新…";
+        updateStatus.textContent = "正在准备更新…";
       } else if (event.event === "Progress") {
         downloaded += event.data.chunkLength;
         if (contentLength > 0) {
@@ -3613,7 +3667,7 @@ async function installAvailableUpdate(): Promise<void> {
           updateStatus.textContent = `正在下载 ${progress}%`;
         }
       } else if (event.event === "Finished") {
-        updateStatus.textContent = "更新已经就绪，正在重新打开 Serenook…";
+        updateStatus.textContent = "更新就绪，正在重启…";
       }
     });
     await relaunch();
@@ -3659,17 +3713,14 @@ async function saveAnniversary(): Promise<void> {
     return;
   }
 
-  const previous = settings;
-  settings = { ...settings, anniversaryDate, anniversaryName };
   try {
-    await invoke("save_settings", { settings });
+    await saveSettingsPatch({ anniversaryDate, anniversaryName });
     setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
     const message = anniversaryMessage();
     if (message) transitionFooterMessage(message);
     scheduleGreetingUpdate();
     showToast(`${anniversaryName} 的第一天已经记下`);
   } catch (error) {
-    settings = previous;
     anniversaryError.textContent = errorMessage(error);
     anniversaryError.hidden = false;
   }
@@ -3766,7 +3817,8 @@ async function initialize(): Promise<void> {
       anniversaryDate: settingsResult.value.anniversaryDate ?? null,
       anniversaryName: settingsResult.value.anniversaryName?.trim() || DEFAULT_ANNIVERSARY_NAME,
       workspaceOrder: normalizeWorkspaceOrder(settingsResult.value.workspaceOrder),
-      collapsedModules: normalizeCollapsedModules(settingsResult.value.collapsedModules),
+      collapsedModules: normalizeModuleSelection(settingsResult.value.collapsedModules),
+      hiddenModules: normalizeModuleSelection(settingsResult.value.hiddenModules),
     };
   }
   else showToast(errorMessage(settingsResult.reason), true);
@@ -3780,7 +3832,7 @@ async function initialize(): Promise<void> {
   else showToast(errorMessage(diariesResult.reason), true);
   await loadDiaryDrafts().catch((error) => showToast(errorMessage(error), true));
   await scratchpadEditor.initialize();
-  new MusicCompanion(element<HTMLElement>("music-card"), () => !settings.collapsedModules.includes("music"));
+  new MusicCompanion(element<HTMLElement>("music-card"), () => isWorkspaceModuleActive("music"));
 
   const checklistsBeforeReset = checklists;
   const checklistResetNeeded = applyDailyChecklistResets();
@@ -3911,6 +3963,13 @@ sleepToggle.addEventListener("click", () => {
 settingsButton.addEventListener("click", openSettings);
 settingsCloseButton.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
+workspaceSettingButton.addEventListener("click", toggleWorkspaceEditor);
+for (const button of workspaceVisibilityButtons) {
+  button.addEventListener("click", () => {
+    const moduleId = button.dataset.workspaceVisibility;
+    if (isWorkspaceModuleId(moduleId)) void toggleWorkspaceVisibility(moduleId);
+  });
+}
 anniversarySettingButton.addEventListener("click", toggleAnniversaryEditor);
 bulkSettingButton.addEventListener("click", toggleBulkEditor);
 themeSettingButton.addEventListener("click", toggleThemeEditor);

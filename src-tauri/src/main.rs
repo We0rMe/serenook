@@ -185,6 +185,8 @@ struct AppSettings {
     workspace_order: Vec<String>,
     #[serde(default)]
     collapsed_modules: Vec<String>,
+    #[serde(default)]
+    hidden_modules: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -226,6 +228,11 @@ fn normalize_workspace_preferences(settings: &mut AppSettings) {
     settings.collapsed_modules.retain(|module| {
         WORKSPACE_MODULES.contains(&module.as_str()) && collapsed.insert(module.clone())
     });
+
+    let mut hidden = HashSet::new();
+    settings.hidden_modules.retain(|module| {
+        WORKSPACE_MODULES.contains(&module.as_str()) && hidden.insert(module.clone())
+    });
 }
 
 impl Default for AppSettings {
@@ -238,6 +245,7 @@ impl Default for AppSettings {
             anniversary_name: default_anniversary_name(),
             workspace_order: default_workspace_order(),
             collapsed_modules: Vec::new(),
+            hidden_modules: Vec::new(),
         }
     }
 }
@@ -1208,6 +1216,15 @@ fn validate_settings(settings: &AppSettings) -> Result<(), String> {
     {
         return Err("工作区折叠状态无效。".into());
     }
+    let hidden_modules: HashSet<&str> =
+        settings.hidden_modules.iter().map(String::as_str).collect();
+    if hidden_modules.len() != settings.hidden_modules.len()
+        || hidden_modules
+            .iter()
+            .any(|module| !WORKSPACE_MODULES.contains(module))
+    {
+        return Err("工作区显示状态无效。".into());
+    }
     Ok(())
 }
 
@@ -1965,6 +1982,7 @@ mod tests {
         assert_eq!(settings.anniversary_name, DEFAULT_ANNIVERSARY_NAME);
         assert_eq!(settings.workspace_order, default_workspace_order());
         assert!(settings.collapsed_modules.is_empty());
+        assert!(settings.hidden_modules.is_empty());
     }
 
     #[test]
@@ -1993,6 +2011,26 @@ mod tests {
             settings.workspace_order,
             vec!["checklists", "shortcuts", "diaries", "scratchpad", "music"]
         );
+        assert!(validate_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn hidden_modules_are_independent_of_order_and_collapsed_state() {
+        let mut settings = AppSettings::default();
+        settings.collapsed_modules = vec!["music".into()];
+        settings.hidden_modules = default_workspace_order();
+        assert!(validate_settings(&settings).is_ok());
+        let restored: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.hidden_modules, default_workspace_order());
+        assert_eq!(restored.workspace_order, default_workspace_order());
+        assert_eq!(restored.collapsed_modules, vec!["music"]);
+
+        settings.hidden_modules = vec!["music".into(), "music".into(), "unknown".into()];
+        assert!(validate_settings(&settings).is_err());
+        normalize_workspace_preferences(&mut settings);
+        assert_eq!(settings.hidden_modules, vec!["music"]);
+        assert_eq!(settings.collapsed_modules, vec!["music"]);
         assert!(validate_settings(&settings).is_ok());
     }
 

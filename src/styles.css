@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Serenook Hand";
+  src: url("./assets/fonts/LongCang-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
 :root {
   color-scheme: light;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", sans-serif;
@@ -252,14 +260,6 @@ main {
   width: 100%;
 }
 
-.dialog-kicker {
-  display: block;
-  margin-bottom: 13px;
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.17em;
-}
 
 h1,
 h2 {
@@ -461,8 +461,18 @@ body.is-reordering * {
 
 .workspace-module-content-inner {
   min-height: 0;
-  padding: 8px 0 20px;
+  padding: 0;
   overflow: hidden;
+  transition: padding 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workspace-module-content.is-open > .workspace-module-content-inner {
+  padding: 8px 0 20px;
+}
+
+.workspace-sections[hidden],
+.workspace-module[hidden] {
+  display: none;
 }
 
 .entry-heading,
@@ -1985,18 +1995,15 @@ body.is-reordering * {
   }
 }
 
-.footer-note span {
-  padding-bottom: 3px;
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
-
 #daily-quote {
-  max-width: min(340px, 46vw);
-  color: var(--footer-ink);
-  opacity: 0.95;
-  line-height: 1.65;
+  max-width: min(440px, 46vw);
+  padding-bottom: 3px;
+  font-family: "Serenook Hand", "KaiTi", "STKaiti", serif;
+  font-size: 19px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+  line-height: 1.8;
   text-align: right;
   text-wrap: balance;
 }
@@ -2149,9 +2156,6 @@ body.is-reordering * {
   justify-content: space-between;
 }
 
-.dialog-kicker {
-  margin-bottom: 6px;
-}
 
 .dialog-heading h2 {
   font-size: 25px;
@@ -2716,14 +2720,6 @@ body.is-reordering * {
   border-bottom: 1px solid var(--border);
 }
 
-.settings-kicker {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--accent);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-}
 
 .settings-heading h2 {
   font-size: 25px;
@@ -2735,11 +2731,13 @@ body.is-reordering * {
   padding-top: 14px;
   overflow-y: auto;
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 
 .setting-item {
   width: 100%;
   min-height: 58px;
+  margin: 0;
   padding: 10px;
   display: flex;
   align-items: center;
@@ -2785,13 +2783,6 @@ body.is-reordering * {
   font-weight: 600;
 }
 
-.setting-item-copy small {
-  overflow: hidden;
-  color: var(--faint);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .setting-item-chevron,
 .setting-item-chevron svg {
@@ -2890,13 +2881,6 @@ body.is-reordering * {
   font-weight: 600;
 }
 
-.anniversary-copy {
-  margin: 0 0 14px;
-  color: var(--muted);
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC", STSong, serif;
-  font-size: 12px;
-  line-height: 1.7;
-}
 
 .anniversary-form label:not(:first-of-type) {
   margin-top: 13px;
@@ -2946,6 +2930,10 @@ body.is-reordering * {
   background: var(--background);
 }
 
+.workspace-settings-panel .field-hint {
+  margin: 6px 8px 7px;
+}
+
 .startup-toggle {
   width: 100%;
   min-height: 48px;
@@ -2977,10 +2965,6 @@ body.is-reordering * {
   font-weight: 600;
 }
 
-.startup-toggle small {
-  color: var(--faint);
-  font-size: 9px;
-}
 
 .setting-switch {
   width: 34px;
@@ -3062,12 +3046,6 @@ body.is-reordering * {
   height: 19px;
 }
 
-.welcome-kicker {
-  color: var(--accent);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-}
 
 .welcome-card h2 {
   margin: 14px 0 0;
@@ -3470,6 +3448,7 @@ body.is-reordering * {
   .shortcut-card,
   .workspace-module,
   .workspace-module-content,
+  .workspace-module-content-inner,
   .workspace-module-chevron,
   .module-drag-handle,
   .checklist-card,

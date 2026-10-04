@@ -74,7 +74,7 @@
 
                 <section id="empty-state" class="empty-state" hidden>
                   <span class="empty-icon" data-icon="sparkles" aria-hidden="true"></span>
-                  <p>这里还很安静，放入第一个常用入口吧。</p>
+                  <p>还没有常用入口</p>
                   <button id="empty-add-button" class="primary-button" type="button">添加应用</button>
                 </section>
 
@@ -117,8 +117,8 @@
                 <div id="checklist-grid" class="checklist-grid" aria-label="我的清单"></div>
                 <section id="checklist-empty-state" class="checklist-empty-state" hidden>
                   <span data-icon="checklist" aria-hidden="true"></span>
-                  <p>还没有清单，先为一件事留个位置。</p>
-                  <button id="empty-checklist-add-button" class="secondary-button" type="button">添加第一张清单</button>
+                  <p>还没有清单</p>
+                  <button id="empty-checklist-add-button" class="secondary-button" type="button">添加清单</button>
                 </section>
               </div>
             </div>
@@ -151,8 +151,8 @@
                 <div id="diary-grid" class="diary-grid" aria-label="我的日记"></div>
                 <section id="diary-empty-state" class="diary-empty-state" hidden>
                   <span data-icon="book" aria-hidden="true"></span>
-                  <p>还没有文字，先留下此刻。</p>
-                  <button id="empty-diary-add-button" class="secondary-button" type="button">记录第一篇</button>
+                  <p>还没有日记</p>
+                  <button id="empty-diary-add-button" class="secondary-button" type="button">记录此刻</button>
                 </section>
               </div>
             </div>
@@ -237,9 +237,8 @@
       <div id="welcome-backdrop" class="welcome-backdrop" hidden>
         <section id="welcome-card" class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-copy" aria-hidden="true" inert>
           <span class="welcome-mark" data-icon="book" aria-hidden="true"></span>
-          <span class="welcome-kicker">WELCOME TO SERENOOK</span>
           <h2 id="welcome-title">初次见面，愿这里恰好安静。</h2>
-          <p id="welcome-copy">花一点时间读完使用说明，会更快熟悉这处小小的工作角落。</p>
+          <p id="welcome-copy">从使用说明，了解你的工作台。</p>
           <div class="welcome-actions">
             <button id="welcome-skip-button" class="secondary-button" type="button">暂时跳过</button>
             <button id="welcome-read-button" class="primary-button" type="button">阅读使用说明</button>
@@ -251,7 +250,6 @@
       <aside id="settings-panel" class="settings-panel" aria-hidden="true" aria-labelledby="settings-title">
         <header class="settings-heading">
           <div>
-            <span class="settings-kicker">SERENOOK</span>
             <h2 id="settings-title">设置</h2>
           </div>
           <button id="settings-close-button" class="dialog-close-button" type="button" aria-label="关闭设置">
@@ -259,18 +257,86 @@
           </button>
         </header>
         <div class="settings-list">
+          <button id="workspace-setting-button" class="setting-item" type="button" aria-expanded="false" aria-controls="workspace-editor">
+            <span class="setting-item-icon" data-icon="app" aria-hidden="true"></span>
+            <span class="setting-item-copy"><strong>工作台</strong></span>
+            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="workspace-editor" class="setting-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
+              <div class="startup-panel workspace-settings-panel" role="group" aria-label="显示的分区" aria-describedby="workspace-visibility-hint">
+                <button class="startup-toggle" type="button" data-workspace-visibility="shortcuts" aria-pressed="true">
+                  <span><strong>常用入口</strong></span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+                <button class="startup-toggle" type="button" data-workspace-visibility="checklists" aria-pressed="true">
+                  <span><strong>清单</strong></span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+                <button class="startup-toggle" type="button" data-workspace-visibility="diaries" aria-pressed="true">
+                  <span><strong>日记</strong></span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+                <button class="startup-toggle" type="button" data-workspace-visibility="scratchpad" aria-pressed="true">
+                  <span><strong>随手记</strong></span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+                <button class="startup-toggle" type="button" data-workspace-visibility="music" aria-pressed="true">
+                  <span><strong>此刻在听</strong></span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+                <p id="workspace-visibility-hint" class="field-hint">隐藏不会删除内容。</p>
+              </div>
+            </div>
+          </div>
+          <button id="theme-setting-button" class="setting-item" type="button" aria-expanded="false">
+            <span class="setting-item-icon" data-icon="moon" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>浅色与深色</strong>
+            </span>
+            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="theme-editor" class="setting-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
+              <div class="startup-panel">
+                <button id="theme-toggle" class="startup-toggle" type="button" aria-pressed="false">
+                  <span>
+                    <strong>深色模式</strong>
+                  </span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <button id="startup-setting-button" class="setting-item" type="button" aria-expanded="false">
+            <span class="setting-item-icon" data-icon="startup" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>开机自启</strong>
+            </span>
+            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="startup-editor" class="setting-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
+              <div class="startup-panel">
+                <button id="startup-toggle" class="startup-toggle" type="button" aria-pressed="false">
+                  <span>
+                    <strong>随电脑启动</strong>
+                  </span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+              </div>
+            </div>
+          </div>
           <button id="anniversary-setting-button" class="setting-item" type="button" aria-expanded="false">
             <span class="setting-item-icon" data-icon="flower" aria-hidden="true"></span>
             <span class="setting-item-copy">
               <strong>纪念日</strong>
-              <small>平淡生活中蕴藏的幸福与惊喜</small>
             </span>
             <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
           </button>
           <div id="anniversary-editor" class="setting-editor" aria-hidden="true" inert>
             <div class="setting-editor-inner">
               <form id="anniversary-form" class="setting-form anniversary-form" novalidate>
-                <p class="anniversary-copy">给这段日子一个名字，再记下第一天。</p>
                 <label for="anniversary-name-input">纪念日名称</label>
                 <input id="anniversary-name-input" type="text" maxlength="7" pattern="[A-Za-z]{1,7}" placeholder="Love" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="anniversary-name-hint" title="请输入 1–7 个英文字母" required />
                 <p id="anniversary-name-hint" class="field-hint anniversary-name-hint">1–7 个英文字母，如 Love、Birth 或 Dog</p>
@@ -284,11 +350,17 @@
               </form>
             </div>
           </div>
+          <button id="installed-apps-setting-button" class="setting-item" type="button">
+            <span class="setting-item-icon" data-icon="app" aria-hidden="true"></span>
+            <span class="setting-item-copy">
+              <strong>导入本机应用</strong>
+            </span>
+            <span class="setting-item-chevron" data-icon="arrow" aria-hidden="true"></span>
+          </button>
           <button id="bulk-setting-button" class="setting-item" type="button" aria-expanded="false">
             <span class="setting-item-icon" data-icon="layers" aria-hidden="true"></span>
             <span class="setting-item-copy">
-              <strong>一键操作</strong>
-              <small>一键睡眠、一键苏醒</small>
+              <strong>批量睡眠与苏醒</strong>
             </span>
             <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
           </button>
@@ -306,67 +378,16 @@
               </div>
             </div>
           </div>
-          <button id="installed-apps-setting-button" class="setting-item" type="button">
-            <span class="setting-item-icon" data-icon="app" aria-hidden="true"></span>
-            <span class="setting-item-copy">
-              <strong>导入本机应用</strong>
-              <small>从已安装的应用中批量选择</small>
-            </span>
+          <button id="backup-setting-button" class="setting-item" type="button">
+            <span class="setting-item-icon" data-icon="archive" aria-hidden="true"></span>
+            <span class="setting-item-copy"><strong>备份与恢复</strong></span>
             <span class="setting-item-chevron" data-icon="arrow" aria-hidden="true"></span>
           </button>
-          <button id="theme-setting-button" class="setting-item" type="button" aria-expanded="false">
-            <span class="setting-item-icon" data-icon="moon" aria-hidden="true"></span>
-            <span class="setting-item-copy">
-              <strong>浅色与深色</strong>
-              <small>为此刻选择合适的明暗</small>
-            </span>
-            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
-          </button>
-          <div id="theme-editor" class="setting-editor" aria-hidden="true" inert>
-            <div class="setting-editor-inner">
-              <div class="startup-panel">
-                <button id="theme-toggle" class="startup-toggle" type="button" aria-pressed="false">
-                  <span>
-                    <strong>深色模式</strong>
-                    <small>关闭时使用浅色外观</small>
-                  </span>
-                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
-                </button>
-              </div>
-            </div>
-          </div>
           <button id="guide-setting-button" class="setting-item" type="button">
             <span class="setting-item-icon" data-icon="book" aria-hidden="true"></span>
             <span class="setting-item-copy">
               <strong>使用说明</strong>
-              <small>从相识结交，到熟悉默契</small>
             </span>
-            <span class="setting-item-chevron" data-icon="arrow" aria-hidden="true"></span>
-          </button>
-          <button id="startup-setting-button" class="setting-item" type="button" aria-expanded="false">
-            <span class="setting-item-icon" data-icon="startup" aria-hidden="true"></span>
-            <span class="setting-item-copy">
-              <strong>开机自启</strong>
-              <small>随 Windows 安静地醒来</small>
-            </span>
-            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
-          </button>
-          <div id="startup-editor" class="setting-editor" aria-hidden="true" inert>
-            <div class="setting-editor-inner">
-              <div class="startup-panel">
-                <button id="startup-toggle" class="startup-toggle" type="button" aria-pressed="false">
-                  <span>
-                    <strong>随电脑启动</strong>
-                    <small>登录 Windows 后自动打开 Serenook</small>
-                  </span>
-                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <button id="backup-setting-button" class="setting-item" type="button">
-            <span class="setting-item-icon" data-icon="archive" aria-hidden="true"></span>
-            <span class="setting-item-copy"><strong>备份与恢复</strong><small>把记录妥善留在本地</small></span>
             <span class="setting-item-chevron" data-icon="arrow" aria-hidden="true"></span>
           </button>
           <div class="settings-version-row"><span id="settings-version"></span><button id="check-update-button" class="text-action" type="button">检查更新</button></div>
@@ -389,7 +410,7 @@
               <span class="guide-number">01</span>
               <div>
                 <h3>一处安静的工作台</h3>
-                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。轻点分区标题收起内容，拖动左侧把手调整顺序。使用左上角查找或 Ctrl+K，可以找到入口、任务、日记与随手记，并定位匹配文字。</p>
+                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。轻点分区标题收起内容，拖动左侧把手调整顺序。在设置的“工作台”中选择显示哪些分区，隐藏不会删除内容。使用左上角查找或 Ctrl+K，可以找到入口、任务、日记与随手记；跳转时会打开对应分区并定位匹配文字。</p>
               </div>
             </article>
 
@@ -449,7 +470,7 @@
               </div>
             </article>
             <article class="guide-block">
-              <span class="guide-number">08</span>
+              <span class="guide-number">09</span>
               <div><h3>更新</h3><p>启动后自动检查新版本，设置按钮上的小点会安静提醒。也可在设置底部检查更新、查看说明并选择安装。</p></div>
             </article>
           </div>
@@ -467,7 +488,6 @@
       <form id="shortcut-form" method="dialog" novalidate>
         <header class="dialog-heading">
           <div>
-            <span class="dialog-kicker">SHORTCUT</span>
             <h2 id="dialog-title">添加一个入口</h2>
           </div>
           <button id="dialog-close-button" class="dialog-close-button" type="button" aria-label="关闭">
@@ -526,14 +546,13 @@
     <dialog id="installed-apps-dialog" class="shortcut-dialog installed-apps-dialog" aria-labelledby="installed-apps-title">
       <header class="dialog-heading installed-apps-heading">
         <div>
-          <span class="dialog-kicker">LOCAL APPS</span>
           <h2 id="installed-apps-title">选择本机应用</h2>
         </div>
         <button id="installed-apps-close" class="dialog-close-button" type="button" aria-label="关闭应用选择">
           <span data-icon="close" aria-hidden="true"></span>
         </button>
       </header>
-      <p class="installed-apps-intro">读取 Windows 中已安装的应用。选中后，统一放入睡眠区。</p>
+      <p class="installed-apps-intro">选中的应用将放入睡眠区。</p>
       <div class="installed-apps-search">
         <span data-icon="search" aria-hidden="true"></span>
         <input id="installed-apps-search-input" type="search" placeholder="查找应用" autocomplete="off" />
@@ -559,7 +578,6 @@
       <form id="schedule-form" method="dialog">
         <header class="dialog-heading">
           <div>
-            <span class="dialog-kicker">WEEKLY RHYTHM</span>
             <h2>安排一周的苏醒</h2>
           </div>
           <button id="schedule-close-button" class="dialog-close-button" type="button" aria-label="关闭">
@@ -590,7 +608,6 @@
       <form id="checklist-form" method="dialog" novalidate>
         <header class="dialog-heading">
           <div>
-            <span class="dialog-kicker">NEW LIST</span>
             <h2>添一张清单</h2>
           </div>
           <button id="checklist-dialog-close-button" class="dialog-close-button" type="button" aria-label="关闭">
@@ -620,7 +637,6 @@
       <form id="diary-form" method="dialog" novalidate>
         <header class="dialog-heading">
           <div>
-            <span class="dialog-kicker">A QUIET MOMENT</span>
             <h2 id="diary-dialog-title">记录此刻</h2>
           </div>
           <button id="diary-dialog-close-button" class="dialog-close-button" type="button" aria-label="关闭">
@@ -666,7 +682,6 @@
     <dialog id="update-dialog" class="shortcut-dialog update-dialog">
       <section class="update-card" aria-labelledby="update-title">
         <span class="update-mark" data-icon="sparkles" aria-hidden="true"></span>
-        <span class="dialog-kicker">SERENOOK UPDATE</span>
         <h2 id="update-title">发现新版本</h2>
         <strong id="update-version" class="update-version"></strong>
         <div id="update-notes" class="update-notes"></div>
@@ -678,9 +693,11 @@
       </section>
     </dialog>
 
-    <dialog id="search-dialog" class="shortcut-dialog search-dialog" aria-labelledby="search-title">
-      <header class="dialog-heading"><h2 id="search-title">找一找</h2><button id="search-close-button" class="dialog-close-button" type="button" aria-label="关闭查找"><span data-icon="close" aria-hidden="true"></span></button></header>
-      <input id="search-input" type="search" placeholder="入口、任务、日记或随手记" autocomplete="off" aria-label="查找内容" aria-controls="search-results" />
+    <dialog id="search-dialog" class="shortcut-dialog search-dialog" aria-label="查找工作台内容">
+      <div class="search-bar">
+        <input id="search-input" type="search" placeholder="查找入口、任务、日记或随手记" autocomplete="off" aria-label="查找内容" aria-controls="search-results" />
+        <button id="search-close-button" class="dialog-close-button" type="button" aria-label="关闭查找"><span data-icon="close" aria-hidden="true"></span></button>
+      </div>
       <p id="search-status" class="field-hint" role="status"></p>
       <div id="search-results" class="search-results"></div>
     </dialog>
@@ -697,7 +714,7 @@
         <select id="scratchpad-task-list" autofocus></select>
         <label for="scratchpad-task-content">任务内容</label>
         <textarea id="scratchpad-task-content" rows="4" aria-describedby="scratchpad-task-hint scratchpad-task-error"></textarea>
-        <p id="scratchpad-task-hint" class="field-hint">一次记下一件事，随手记中的原文保留。</p>
+        <p id="scratchpad-task-hint" class="field-hint">随手记中的原文保留。</p>
         <p id="scratchpad-task-error" class="form-error" role="alert" hidden></p>
         <div class="dialog-actions"><span class="dialog-spacer"></span><button id="scratchpad-task-save" class="primary-button" type="submit">加入</button></div>
       </form>
