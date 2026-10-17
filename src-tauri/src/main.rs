@@ -3,6 +3,7 @@
 mod media;
 mod media_cloud;
 mod music_lyrics;
+mod quick_search;
 mod storage;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -187,6 +188,8 @@ struct AppSettings {
     collapsed_modules: Vec<String>,
     #[serde(default)]
     hidden_modules: Vec<String>,
+    #[serde(default)]
+    quick_search_shortcut: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -246,6 +249,7 @@ impl Default for AppSettings {
             workspace_order: default_workspace_order(),
             collapsed_modules: Vec::new(),
             hidden_modules: Vec::new(),
+            quick_search_shortcut: None,
         }
     }
 }
@@ -1173,6 +1177,7 @@ fn is_valid_calendar_date(value: &str) -> bool {
 }
 
 fn validate_settings(settings: &AppSettings) -> Result<(), String> {
+    quick_search::validate(settings.quick_search_shortcut.as_deref())?;
     if settings
         .anniversary_date
         .as_deref()
@@ -1670,6 +1675,68 @@ fn validate_relocation(target: String, kind: ShortcutKind) -> Result<(), LaunchE
     local_launch_target(&target, kind).map(|_| ())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalShortcutDraft {
+    name: String,
+    target: String,
+    kind: ShortcutKind,
+}
+
+fn dropped_entry_name(path: &Path, kind: ShortcutKind) -> String {
+    let raw = if kind == ShortcutKind::Folder {
+        path.file_name()
+    } else {
+        path.file_stem()
+    }
+    .unwrap_or(path.as_os_str())
+    .to_string_lossy();
+    // Match the editor's maxlength (UTF-16 units) without splitting a character.
+    let name: String = raw
+        .trim()
+        .chars()
+        .scan(0, |units, character| {
+            *units += character.len_utf16();
+            (*units <= 64).then_some(character)
+        })
+        .collect();
+    if name.is_empty() {
+        "新入口".into()
+    } else {
+        name
+    }
+}
+
+fn inspect_local_entry(target: &str) -> Result<LocalShortcutDraft, String> {
+    let path = PathBuf::from(target.trim());
+    if !path.is_absolute() {
+        return Err("请拖入一个本地文件或文件夹。".into());
+    }
+    let metadata = fs::metadata(&path).map_err(|_| "暂时无法访问这个位置。".to_string())?;
+    let kind = if metadata.is_dir() {
+        ShortcutKind::Folder
+    } else if metadata.is_file() {
+        validate_target(target, false)?;
+        ShortcutKind::Local
+    } else {
+        return Err("请拖入一个本地文件或文件夹。".into());
+    };
+    Ok(LocalShortcutDraft {
+        name: dropped_entry_name(&path, kind),
+        // Preserve .lnk/.url paths: resolving them would discard shortcut settings.
+        target: path.to_string_lossy().into_owned(),
+        kind,
+    })
+}
+
+#[tauri::command]
+async fn inspect_dropped_entry(target: String) -> Result<LocalShortcutDraft, String> {
+    // Network drives may respond slowly; never perform their metadata reads on the UI thread.
+    tauri::async_runtime::spawn_blocking(move || inspect_local_entry(&target))
+        .await
+        .map_err(|_| "暂时无法读取这个入口。".to_string())?
+}
+
 #[tauri::command]
 fn launch_app(target: String, kind: ShortcutKind) -> Result<(), LaunchError> {
     if matches!(kind, ShortcutKind::Web) {
@@ -1693,10 +1760,15 @@ fn launch_app(target: String, kind: ShortcutKind) -> Result<(), LaunchError> {
 
 fn main() {
     tauri::Builder::default()
+        .manage(quick_search::QuickSearch::default())
+        .plugin(tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(quick_search::on_shortcut).build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            quick_search::set_quick_search_shortcut,
+            quick_search::finish_quick_search,
             media::media_snapshot,
             media::media_control,
             media::media_seek,
@@ -1723,6 +1795,7 @@ fn main() {
             get_app_icon,
             detect_running_apps,
             launch_app,
+            inspect_dropped_entry,
             validate_relocation
         ])
         .run(tauri::generate_context!())
@@ -1766,6 +1839,74 @@ mod tests {
         let executable = env::current_exe().unwrap();
         let display_icon = format!(r#""{}",0"#, executable.display());
         assert_eq!(display_icon_path(&display_icon), Some(executable));
+    }
+
+    #[test]
+    fn dropped_entries_classify_existing_files_and_folders_without_modifying_them() {
+        struct TestDirectory(PathBuf);
+        impl Drop for TestDirectory {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = TestDirectory(
+            env::temp_dir().join(format!("serenook-drop-{}-{unique}", std::process::id())),
+        );
+        fs::create_dir(&directory.0).unwrap();
+        for filename in [
+            "笔记.MD",
+            "报告.PDF",
+            "方案.docx",
+            "演示.pptx",
+            "应用.lnk",
+            "页面.url",
+            "程序.exe",
+        ] {
+            let path = directory.0.join(filename);
+            fs::write(&path, b"unchanged fixture").unwrap();
+            let draft = inspect_local_entry(path.to_str().unwrap()).unwrap();
+            assert_eq!(draft.kind, ShortcutKind::Local);
+            assert_eq!(draft.target, path.to_string_lossy());
+            assert_eq!(draft.name, path.file_stem().unwrap().to_string_lossy());
+            assert_eq!(fs::read(&path).unwrap(), b"unchanged fixture");
+        }
+        let folder = directory.0.join("项目.v2.pdf");
+        fs::create_dir(&folder).unwrap();
+        let draft = inspect_local_entry(folder.to_str().unwrap()).unwrap();
+        assert_eq!(draft.kind, ShortcutKind::Folder);
+        assert_eq!(draft.name, "项目.v2.pdf");
+        assert_eq!(draft.target, folder.to_string_lossy());
+        let archive = directory.0.join("archive.zip");
+        fs::write(&archive, b"unsupported").unwrap();
+        assert!(inspect_local_entry(archive.to_str().unwrap()).is_err());
+        assert!(inspect_local_entry(directory.0.join("absent.pdf").to_str().unwrap()).is_err());
+        assert!(inspect_local_entry("relative.pdf").is_err());
+        assert!(inspect_local_entry("https://example.com/note.pdf").is_err());
+    }
+
+    #[test]
+    fn dropped_entry_names_preserve_folder_dots_and_fit_the_editor() {
+        assert_eq!(
+            dropped_entry_name(Path::new(r"C:\资料\计划.v2.docx"), ShortcutKind::Local),
+            "计划.v2"
+        );
+        assert_eq!(
+            dropped_entry_name(Path::new(r"C:\资料\计划.v2.docx"), ShortcutKind::Folder),
+            "计划.v2.docx"
+        );
+        assert_eq!(
+            dropped_entry_name(Path::new(r"C:\"), ShortcutKind::Folder),
+            r"C:\"
+        );
+        let long = format!(r"C:\资料\{}.txt", "记🌱".repeat(50));
+        let name = dropped_entry_name(Path::new(&long), ShortcutKind::Local);
+        assert!(name.encode_utf16().count() <= 64);
+        assert!(name.chars().count() > 30);
+        assert!("记🌱".repeat(50).starts_with(&name));
     }
 
     #[test]
@@ -1983,6 +2124,18 @@ mod tests {
         assert_eq!(settings.workspace_order, default_workspace_order());
         assert!(settings.collapsed_modules.is_empty());
         assert!(settings.hidden_modules.is_empty());
+        assert!(settings.quick_search_shortcut.is_none());
+    }
+
+    #[test]
+    fn quick_search_settings_round_trip_and_reject_reserved_combinations() {
+        let mut settings = AppSettings::default();
+        settings.quick_search_shortcut = Some("Control+Alt+Space".into());
+        assert!(validate_settings(&settings).is_ok());
+        let restored: AppSettings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.quick_search_shortcut, settings.quick_search_shortcut);
+        settings.quick_search_shortcut = Some("Alt+F4".into());
+        assert!(validate_settings(&settings).is_err());
     }
 
     #[test]

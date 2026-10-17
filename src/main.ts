@@ -10,8 +10,13 @@ import { ScratchpadEditor } from "./scratchpad";
 import { ScratchpadTaskComposer, taskDestinationError } from "./scratchpad-task";
 import { locateText, textExcerpt } from "./text-location";
 import { MusicCompanion } from "./music";
+import { ShortcutDropController, localEntryIdentity, type LocalShortcutDraft } from "./shortcut-drop";
+import { ChecklistComposer } from "./checklist-composer";
+import { QuickSearchSettings } from "./quick-search";
+import { SearchSelection, searchNavigationKey } from "./search-interaction";
 import "./styles.css";
 import "./workspace.css";
+import "./controls.css";
 
 type IconName = "app" | "chat" | "code" | "compass" | "folder" | "document" | "sheet" | "pdf" | "presentation";
 type ShortcutKind = "local" | "web" | "folder" | "app";
@@ -47,6 +52,7 @@ interface AppSettings {
   workspaceOrder: WorkspaceModuleId[];
   collapsedModules: WorkspaceModuleId[];
   hiddenModules: WorkspaceModuleId[];
+  quickSearchShortcut: string | null;
 }
 
 interface ChecklistTask {
@@ -170,6 +176,8 @@ const ICONS: Record<string, string> = {
   compass: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/></svg>',
   folder: '<svg viewBox="0 0 24 24"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6.5Z"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></svg>',
+  download: '<svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="m4 20 4.2-1 10.5-10.5a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20Z"/><path d="m14.7 6.9 2.8 2.8"/></svg>',
   minus: '<svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>',
   maximize: '<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>',
@@ -205,6 +213,7 @@ const workspaceSections = element<HTMLElement>("workspace-sections");
 const shortcutsModule = element<HTMLElement>("shortcuts-module");
 const shortcutsModuleToggle = element<HTMLButtonElement>("shortcuts-module-toggle");
 const shortcutsModuleContent = element<HTMLElement>("shortcuts-module-content");
+const shortcutDropHint = element<HTMLElement>("shortcut-drop-hint");
 const checklistsModule = element<HTMLElement>("checklists-module");
 const checklistsModuleToggle = element<HTMLButtonElement>("checklists-module-toggle");
 const checklistsModuleContent = element<HTMLElement>("checklists-module-content");
@@ -325,6 +334,7 @@ let settings: AppSettings = {
   workspaceOrder: [...WORKSPACE_MODULE_IDS],
   collapsedModules: [],
   hiddenModules: [],
+  quickSearchShortcut: null,
 };
 let settingsSaveQueue: Promise<void> = Promise.resolve();
 let workspacePreferencesSaving = false;
@@ -335,6 +345,9 @@ let scheduling = false;
 let sleepExpanded = false;
 let launchingAll = false;
 let newShortcutSleeping = false;
+let droppedEntryDraft = false;
+let shortcutsLoaded = false;
+let unlistenShortcutDrop: (() => void) | undefined;
 let runningDetectionPending = true;
 let runningDetectionInFlight = false;
 let runningPollTimer: number | undefined;
@@ -349,6 +362,7 @@ let scheduledShortcutId = "";
 let footerSignatureTimer: number | undefined;
 let plantBloomTimer: number | undefined;
 let editingChecklistId: string | null = null;
+const checklistComposer = new ChecklistComposer();
 let diaryReaderReturnTarget: HTMLElement | null = null;
 let diaryReaderCloseTimer: number | undefined;
 let diaryReaderSettleTimer: number | undefined;
@@ -379,6 +393,31 @@ let installedAppsLoadError = "";
 const searchDialog = element<HTMLDialogElement>("search-dialog");
 const searchInput = element<HTMLInputElement>("search-input");
 const searchResults = element<HTMLElement>("search-results");
+const searchSelection = new SearchSelection();
+interface WorkspaceSearchResult {
+  title: string;
+  detail: string;
+  kind: string;
+  external?: boolean;
+  action: () => void | Promise<void>;
+}
+let displayedSearchResults: WorkspaceSearchResult[] = [];
+let searchComposing = false;
+const quickSearchSettingButton = element<HTMLButtonElement>("quick-search-setting-button");
+const quickSearchEditor = element<HTMLElement>("quick-search-editor");
+const quickSearchSettings = new QuickSearchSettings(
+  () => settings.quickSearchShortcut,
+  (shortcut) => saveSettingsPatch({ quickSearchShortcut: shortcut }),
+  () => {
+    if (searchDialog.open) { searchInput.focus(); return true; }
+    if (document.querySelector("dialog[open]") || welcomeOpen) {
+      showToast("请先完成当前操作，再查找。", true);
+      return false;
+    }
+    openSearch();
+    return searchDialog.open;
+  },
+);
 const checklistFocusDialog = element<HTMLDialogElement>("checklist-focus-dialog");
 const checklistFocusContent = element<HTMLElement>("checklist-focus-content");
 const taskLinkDialog = element<HTMLDialogElement>("task-link-dialog");
@@ -669,10 +708,12 @@ function isShortcutRunning(shortcut: AppShortcut): boolean {
 }
 
 function selectedShortcutKind(): ShortcutKind {
+  // Imported Windows applications keep their launch identity while being edited.
+  const existing = shortcuts.find((shortcut) => shortcut.id === idInput.value);
+  if (existing && shortcutKind(existing) === "app") return "app";
   const selected = form.querySelector<HTMLInputElement>('input[name="shortcut-kind"]:checked');
   if (selected?.value === "web") return "web";
   if (selected?.value === "folder") return "folder";
-  if (selected?.value === "app") return "app";
   return "local";
 }
 
@@ -967,7 +1008,7 @@ async function flushDiaryDraft(): Promise<void> {
 }
 
 async function flushWorkspaceEdits(): Promise<void> {
-  await Promise.all([flushDiaryDraft(), scratchpadEditor.flush(), scratchpadTaskComposer.flush()]);
+  await Promise.all([flushDiaryDraft(), scratchpadEditor.flush(), scratchpadTaskComposer.flush(), checklistComposer.flush(), quickSearchSettings.flush()]);
 }
 
 function renderDraftNotice(): void {
@@ -1258,7 +1299,7 @@ function openChecklistDialog(): void {
 
 function closeChecklistDialog(): void {
   checklistDialog.close();
-  addChecklistButton.focus();
+  (addChecklistButton.hidden ? emptyChecklistAddButton : addChecklistButton).focus({ preventScroll: true });
 }
 
 async function addChecklistFromForm(): Promise<void> {
@@ -1326,20 +1367,121 @@ async function toggleChecklistDailyReset(checklistId: string): Promise<void> {
 
 async function addChecklistTask(
   checklistId: string,
-  input: HTMLInputElement,
-  importantButton: HTMLButtonElement,
-): Promise<void> {
-  const content = input.value.trim();
-  if (!content) return;
-  const important = importantButton.getAttribute("aria-pressed") === "true";
+  content: string,
+  important: boolean,
+): Promise<boolean> {
+  const list = checklists.find((item) => item.id === checklistId);
+  if (!list || list.archived) {
+    showToast("这张清单已收存或移除，暂时无法添加任务。", true);
+    return false;
+  }
+  if (list.tasks.length >= 100) {
+    showToast("每张清单最多保存 100 项任务。", true);
+    return false;
+  }
+  if (!content.trim() || content.length > MAX_TASK_CONTENT_LENGTH) return false;
   const previous = checklists;
   checklists = checklists.map((checklist) => checklist.id === checklistId
     ? { ...checklist, tasks: [...checklist.tasks, { id: crypto.randomUUID(), content, completed: false, important }] }
     : checklist);
-  renderChecklists();
-  if (await persistChecklistChanges(previous)) {
-    window.setTimeout(() => activeChecklistRoot().querySelector<HTMLInputElement>(`[data-task-input="${checklistId}"]`)?.focus(), 0);
-  }
+  return persistChecklistChanges(previous);
+}
+
+function focusTaskComposer(id: string): void {
+  activeChecklistRoot().querySelector<HTMLInputElement>(`[data-task-input="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+}
+
+function createTaskComposer(checklist: Checklist): HTMLElement {
+  const state = checklistComposer.get(checklist.id);
+  const shell = document.createElement("div");
+  shell.className = "task-composer-shell";
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "task-composer-trigger quiet-icon-button";
+  trigger.dataset.taskComposerTrigger = checklist.id;
+  trigger.append(icon("plus"));
+  trigger.title = state.content ? "继续添加任务" : "添加任务";
+  trigger.setAttribute("aria-label", `${trigger.title} · ${checklist.name}`);
+  trigger.setAttribute("aria-expanded", String(state.open));
+  trigger.hidden = state.open;
+  trigger.addEventListener("click", () => {
+    checklistComposer.setOpen(checklist.id, true);
+    renderChecklists();
+    focusTaskComposer(checklist.id);
+  });
+
+  const composer = document.createElement("form");
+  composer.className = "task-composer";
+  composer.hidden = !state.open;
+  composer.setAttribute("aria-label", `为 ${checklist.name} 添加任务`);
+  composer.setAttribute("aria-busy", String(state.saving));
+  const input = document.createElement("input");
+  input.className = "task-composer-input";
+  input.dataset.taskInput = checklist.id;
+  input.maxLength = MAX_TASK_CONTENT_LENGTH;
+  input.placeholder = "写下一件事";
+  input.setAttribute("aria-label", `为 ${checklist.name} 添加任务，Enter 确认，Esc 收起`);
+  input.value = state.content;
+  input.disabled = state.saving;
+  const important = document.createElement("button");
+  important.type = "button";
+  important.className = "task-composer-important";
+  important.disabled = state.saving;
+  important.append(icon("star"));
+  const updateImportance = () => {
+    important.setAttribute("aria-pressed", String(state.important));
+    important.title = state.important ? "取消重要标记" : "设为重要";
+    important.setAttribute("aria-label", important.title);
+  };
+  updateImportance();
+  important.addEventListener("click", () => {
+    checklistComposer.update(checklist.id, { important: !state.important });
+    updateImportance();
+  });
+  const add = document.createElement("button");
+  add.type = "submit";
+  add.className = "task-add-button";
+  add.append(icon("plus"));
+  add.title = "添加任务";
+  add.setAttribute("aria-label", "添加任务");
+  add.disabled = state.saving || !state.content.trim();
+  input.addEventListener("input", () => {
+    checklistComposer.update(checklist.id, { content: input.value });
+    add.disabled = state.saving || !input.value.trim();
+  });
+  let composing = false;
+  input.addEventListener("compositionstart", () => { composing = true; });
+  input.addEventListener("compositionend", () => { composing = false; });
+  composer.addEventListener("keydown", (event) => {
+    if (event.isComposing || composing || event.keyCode === 229) return;
+    if (event.key === "Enter" && event.target === input) {
+      event.preventDefault();
+      composer.requestSubmit();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      checklistComposer.setOpen(checklist.id, false);
+      renderChecklists();
+      activeChecklistRoot().querySelector<HTMLButtonElement>(`[data-task-composer-trigger="${CSS.escape(checklist.id)}"]`)?.focus({ preventScroll: true });
+    }
+  });
+  composer.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (composing || state.saving || !state.content.trim()) return;
+    const focusedListAtStart = focusedChecklistId;
+    const request = checklistComposer.submit(checklist.id, (content, marked) => addChecklistTask(checklist.id, content, marked));
+    renderChecklists();
+    void request.catch((error) => { showToast(errorMessage(error), true); }).finally(() => {
+      const shouldFocus = focusedChecklistId === focusedListAtStart
+        && (document.activeElement === document.body || document.activeElement === checklistFocusDialog);
+      renderChecklists();
+      if (shouldFocus && state.open) focusTaskComposer(checklist.id);
+    });
+  });
+  composer.append(input, important, add);
+  shell.append(trigger, composer);
+  return shell;
 }
 
 async function renameChecklistTask(
@@ -1634,14 +1776,15 @@ function createChecklistCard(checklist: Checklist, expanded = false): HTMLElemen
   edit.type = "button";
   edit.className = "checklist-edit-button";
   edit.hidden = Boolean(checklist.archived);
-  edit.append(icon("edit"));
+  edit.append(icon(editingChecklist ? "check" : "edit"));
+  edit.title = editingChecklist ? "完成编辑" : "编辑清单";
   edit.setAttribute("aria-label", editingChecklist ? `完成编辑 ${checklist.name}` : `编辑 ${checklist.name}`);
   edit.setAttribute("aria-pressed", String(editingChecklist));
   edit.addEventListener("click", () => {
     editingChecklistId = editingChecklist ? null : checklist.id;
     renderChecklists();
     if (!editingChecklist) {
-      window.setTimeout(() => activeChecklistRoot().querySelector<HTMLInputElement>(`[data-task-input="${checklist.id}"]`)?.focus(), 0);
+      activeChecklistRoot().querySelector<HTMLInputElement>(`[data-checklist-id="${CSS.escape(checklist.id)}"] .checklist-title-input`)?.focus({ preventScroll: true });
     }
   });
   header.append(titleRow, edit);
@@ -1659,7 +1802,7 @@ function createChecklistCard(checklist: Checklist, expanded = false): HTMLElemen
   if (checklist.tasks.length === 0) {
     const empty = document.createElement("p");
     empty.className = "checklist-task-empty";
-    empty.textContent = editingChecklist ? "在下方写下第一件事。" : "还没有任务。";
+    empty.textContent = "还没有任务。";
     taskFrame.append(empty);
   } else {
     const list = document.createElement("ol");
@@ -1775,39 +1918,8 @@ function createChecklistCard(checklist: Checklist, expanded = false): HTMLElemen
     card.append(completedToggle);
   }
 
+  if (!checklist.archived) card.append(createTaskComposer(checklist));
   if (editingChecklist) {
-    const composer = document.createElement("form");
-    composer.className = "task-composer";
-    const input = document.createElement("input");
-    input.className = "task-composer-input";
-    input.dataset.taskInput = checklist.id;
-    input.maxLength = MAX_TASK_CONTENT_LENGTH;
-    input.placeholder = "添加一项任务";
-    input.setAttribute("aria-label", `为 ${checklist.name} 添加任务`);
-    const important = document.createElement("button");
-    important.type = "button";
-    important.className = "task-composer-important";
-    important.setAttribute("aria-pressed", "false");
-    important.setAttribute("aria-label", "将新任务设为重要");
-    important.title = "设为重要";
-    important.append(icon("star"));
-    important.addEventListener("click", () => {
-      const selected = important.getAttribute("aria-pressed") !== "true";
-      important.setAttribute("aria-pressed", String(selected));
-      important.setAttribute("aria-label", selected ? "取消新任务的重要标记" : "将新任务设为重要");
-      important.title = selected ? "已设为重要" : "设为重要";
-    });
-    const add = document.createElement("button");
-    add.type = "submit";
-    add.className = "task-add-button";
-    add.append(icon("plus"));
-    add.setAttribute("aria-label", "添加任务");
-    composer.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void addChecklistTask(checklist.id, input, important);
-    });
-    composer.append(input, important, add);
-
     const footer = document.createElement("div");
     footer.className = "checklist-edit-footer";
     const dailyReset = document.createElement("button");
@@ -1842,12 +1954,13 @@ function createChecklistCard(checklist: Checklist, expanded = false): HTMLElemen
     });
     const archive = document.createElement("button");
     archive.type = "button";
-    archive.className = "text-action checklist-store-button";
-    archive.textContent = "收存";
+    archive.className = "quiet-icon-button checklist-store-button";
+    archive.append(icon("archive"));
+    archive.title = "收存清单";
     archive.setAttribute("aria-label", `收存清单「${checklist.name}」`);
     archive.addEventListener("click", () => void setChecklistArchived(checklist.id, true));
     footer.append(dailyReset, archive, removeList);
-    card.append(composer, footer);
+    card.append(footer);
   }
 
   if (checklist.archived) {
@@ -1915,6 +2028,9 @@ function renderStoredChecklists(): void {
 
 function renderChecklists(): void {
   if (checklistCardDragState || checklistTaskDragState) return;
+  const activeInput = document.activeElement instanceof HTMLInputElement && document.activeElement.dataset.taskInput
+    ? document.activeElement : null;
+  const inputSelection = activeInput ? { id: activeInput.dataset.taskInput!, start: activeInput.selectionStart, end: activeInput.selectionEnd } : null;
   if (editingChecklistId && !checklists.some((checklist) => checklist.id === editingChecklistId)) {
     editingChecklistId = null;
   }
@@ -1926,6 +2042,7 @@ function renderChecklists(): void {
   checklistGrid.replaceChildren(...active.map((list) => createChecklistCard(list)));
   checklistGrid.hidden = active.length === 0;
   checklistEmptyState.hidden = active.length > 0;
+  addChecklistButton.hidden = active.length === 0;
   renderStoredChecklists();
   if (focusedChecklistId) {
     const focused = checklists.find((list) => list.id === focusedChecklistId);
@@ -1936,6 +2053,13 @@ function renderChecklists(): void {
     const frame = card.querySelector(".checklist-task-frame");
     if (frame) frame.scrollTop = scrollPositions.get(card.dataset.checklistId!) ?? 0;
   });
+  if (inputSelection) {
+    const input = activeChecklistRoot().querySelector<HTMLInputElement>(`[data-task-input="${CSS.escape(inputSelection.id)}"]`);
+    if (input && !input.disabled && !input.closest("[hidden]")) {
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(inputSelection.start, inputSelection.end);
+    }
+  }
 }
 
 function activeChecklistRoot(): HTMLElement {
@@ -2043,7 +2167,7 @@ function closeDiaryDialog(preserveDraft = true): void {
   }
   resetDiaryDeleteConfirmation();
   diaryDialog.close();
-  addDiaryButton.focus({ preventScroll: true });
+  (addDiaryButton.hidden ? emptyDiaryAddButton : addDiaryButton).focus({ preventScroll: true });
 }
 
 function resetDiaryDeleteConfirmation(): void {
@@ -2328,6 +2452,7 @@ function renderDiaries(): void {
   element<HTMLButtonElement>("diary-month-next").disabled = months.indexOf(diaryMonth) <= 0;
   diaryGrid.replaceChildren(...orderedDiaries().filter((entry) => diaryMonthKey(entry) === diaryMonth).map(createDiaryCard));
   diaryGrid.hidden = diaries.length === 0;
+  addDiaryButton.hidden = diaries.length === 0;
   diaryEmptyState.hidden = diaries.length > 0;
 }
 
@@ -2601,6 +2726,10 @@ function render(): void {
   document.body.classList.toggle("scheduling", scheduling);
   editButton.setAttribute("aria-pressed", String(editing));
   editLabel.textContent = editing ? "完成" : "编辑";
+  editButton.title = editing ? "完成编辑" : "编辑入口";
+  editButton.setAttribute("aria-label", editButton.title);
+  const editIcon = editButton.querySelector<HTMLElement>("[data-icon]");
+  if (editIcon) editIcon.innerHTML = ICONS[editing ? "check" : "edit"];
   scheduleButton.setAttribute("aria-pressed", String(scheduling));
   scheduleLabel.textContent = scheduling ? "完成" : "作息";
   scheduleButton.hidden = shortcuts.length === 0;
@@ -2782,21 +2911,52 @@ async function hydrateAppIcons(items: AppShortcut[]): Promise<void> {
   render();
 }
 
-function openEditor(shortcut?: AppShortcut): void {
+function duplicateLocalEntry(target: string, kind: ShortcutKind): boolean {
+  const identity = localEntryIdentity(target, kind);
+  return identity !== null && shortcuts.some((shortcut) => localEntryIdentity(shortcut.target, shortcutKind(shortcut)) === identity);
+}
+
+const shortcutDrop = new ShortcutDropController({
+  available: () => shortcutsLoaded && !mainView.inert && !shortcutsModule.hidden
+    && !settingsPanel.classList.contains("is-open") && !document.querySelector("dialog[open]")
+    && !moduleDragState && !shortcutCardDragState && !checklistCardDragState && !checklistTaskDragState
+    && !restoringBackup && !workspacePreferencesSaving,
+  scale: () => window.devicePixelRatio,
+  hitTest: (x, y) => {
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || !shortcutsModule.contains(hit)) return null;
+    return sleepSection.contains(hit) ? "sleep" : "awake";
+  },
+  feedback: (target, message = "") => {
+    shortcutsModule.classList.toggle("is-file-drop-target", target === "awake");
+    sleepSection.classList.toggle("is-file-drop-target", target === "sleep");
+    shortcutDropHint.hidden = target === null;
+    if (shortcutDropHint.textContent !== message) shortcutDropHint.textContent = message;
+  },
+  inspect: (target) => invoke<LocalShortcutDraft>("inspect_dropped_entry", { target }),
+  problem: (draft) => duplicateLocalEntry(draft.target, draft.kind) ? "这个位置已在常用入口中。"
+    : shortcuts.length >= MAX_SHORTCUTS ? `最多可以保存 ${MAX_SHORTCUTS} 个入口。` : null,
+  open: (draft, sleeping) => openEditor(undefined, { ...draft, sleeping }),
+  notify: (message) => showToast(message, true),
+});
+
+function openEditor(shortcut?: AppShortcut, draft?: LocalShortcutDraft & { sleeping: boolean }): void {
+  shortcutDrop.cancel();
+  droppedEntryDraft = Boolean(draft);
   form.reset();
   formError.hidden = true;
-  const kind = shortcut ? shortcutKind(shortcut) : "local";
-  const installedKindOption = element<HTMLElement>("installed-app-kind-option");
-  form.querySelector<HTMLElement>(".shortcut-kind-selector")?.classList.toggle("is-installed", kind === "app");
-  installedKindOption.hidden = kind !== "app";
-  form.querySelectorAll<HTMLElement>(".shortcut-kind-selector .kind-option:not(#installed-app-kind-option)")
-    .forEach((option) => { option.hidden = kind === "app"; });
+  const kind = shortcut ? shortcutKind(shortcut) : draft?.kind ?? "local";
+  const kindSelector = form.querySelector<HTMLFieldSetElement>(".shortcut-kind-selector");
+  if (kindSelector) {
+    kindSelector.hidden = kind === "app";
+    kindSelector.disabled = kind === "app";
+  }
   const kindInput = form.querySelector<HTMLInputElement>(`input[name="shortcut-kind"][value="${kind}"]`);
   if (kindInput) kindInput.checked = true;
   setTargetMode(kind);
   idInput.value = shortcut?.id ?? "";
-  nameInput.value = shortcut?.name ?? "";
-  targetInput.value = shortcut?.target ?? "";
+  nameInput.value = shortcut?.name ?? draft?.name ?? "";
+  targetInput.value = shortcut?.target ?? draft?.target ?? "";
   dialogTitle.textContent = shortcut ? "修改这个入口" : "添加一个入口";
   sleepButton.hidden = false;
   sleepButton.classList.toggle("is-switch", !shortcut);
@@ -2809,11 +2969,11 @@ function openEditor(shortcut?: AppShortcut): void {
     const iconHolder = sleepButton.querySelector<HTMLElement>("[data-icon]");
     if (iconHolder) iconHolder.innerHTML = ICONS[shortcut.sleeping ? "sun" : "moon"];
   } else {
-    newShortcutSleeping = false;
+    newShortcutSleeping = draft?.sleeping ?? false;
     updateNewShortcutSleepButton();
   }
   dialog.showModal();
-  window.setTimeout(() => (shortcut ? nameInput : element<HTMLButtonElement>("browse-button")).focus(), 0);
+  window.setTimeout(() => (shortcut || draft ? nameInput : browseButton).focus(), 0);
 }
 
 function updateNewShortcutSleepButton(): void {
@@ -2835,8 +2995,9 @@ function handleSleepButton(): void {
 }
 
 function closeEditor(): void {
+  droppedEntryDraft = false;
   dialog.close();
-  editButton.focus();
+  (isWorkspaceModuleActive("shortcuts") ? editButton : shortcutsModuleToggle).focus();
 }
 
 async function chooseTarget(): Promise<void> {
@@ -2885,6 +3046,12 @@ async function saveFromForm(): Promise<void> {
   }
 
   const existingIndex = shortcuts.findIndex((shortcut) => shortcut.id === idInput.value);
+  const fromDrop = droppedEntryDraft;
+  if (fromDrop && duplicateLocalEntry(target, kind)) {
+    formError.textContent = "这个位置已在常用入口中。";
+    formError.hidden = false;
+    return;
+  }
   const next: AppShortcut = {
     id: existingIndex >= 0 ? shortcuts[existingIndex].id : crypto.randomUUID(),
     name,
@@ -2905,10 +3072,15 @@ async function saveFromForm(): Promise<void> {
   try {
     await persist();
     closeEditor();
+    let revealed = true;
+    if (fromDrop) {
+      if (next.sleeping) sleepExpanded = true;
+      revealed = await revealWorkspaceModule("shortcuts");
+    }
     render();
     void hydrateAppIcons([next]);
     void refreshRunningApps();
-    showToast(existingIndex >= 0 ? `已更新 ${name}` : `已添加 ${name}`);
+    if (revealed) showToast(existingIndex >= 0 ? `已更新 ${name}` : `已添加 ${name}`);
   } catch (error) {
     shortcuts = previous;
     formError.textContent = errorMessage(error);
@@ -3267,15 +3439,17 @@ function closeSettings(): void {
   setSettingsEditor(bulkSettingButton, bulkEditor, false);
   setSettingsEditor(themeSettingButton, themeEditor, false);
   setSettingsEditor(startupSettingButton, startupEditor, false);
+  setSettingsEditor(quickSearchSettingButton, quickSearchEditor, false);
   settingsButton.focus();
 }
 
-function closeOtherSettingsEditors(except: "workspace" | "anniversary" | "bulk" | "theme" | "startup"): void {
+function closeOtherSettingsEditors(except: "workspace" | "anniversary" | "bulk" | "theme" | "startup" | "quick-search"): void {
   if (except !== "workspace") setSettingsEditor(workspaceSettingButton, workspaceEditor, false);
   if (except !== "anniversary") setSettingsEditor(anniversarySettingButton, anniversaryEditor, false);
   if (except !== "bulk") setSettingsEditor(bulkSettingButton, bulkEditor, false);
   if (except !== "theme") setSettingsEditor(themeSettingButton, themeEditor, false);
   if (except !== "startup") setSettingsEditor(startupSettingButton, startupEditor, false);
+  if (except !== "quick-search") setSettingsEditor(quickSearchSettingButton, quickSearchEditor, false);
 }
 
 function toggleWorkspaceEditor(): void {
@@ -3469,25 +3643,58 @@ function showAvailableUpdate(): void {
 }
 
 function openSearch(): void {
-  if (searchDialog.open) { searchDialog.close(); return; }
+  if (searchDialog.open) { void closeSearch(); return; }
   if (document.querySelector("dialog[open]") || welcomeOpen) return;
   closeSettings();
   if (guideView.classList.contains("is-open")) closeGuide();
   searchInput.value = "";
   renderSearchResults();
   searchDialog.showModal();
+  searchInput.setAttribute("aria-expanded", "true");
   searchInput.focus();
+}
+
+async function closeSearch(returnToPrevious = true): Promise<void> {
+  searchDialog.close();
+  searchInput.setAttribute("aria-expanded", "false");
+  await quickSearchSettings.finish(returnToPrevious);
+}
+
+function highlightSearchSelection(scroll = false): void {
+  const buttons = [...searchResults.querySelectorAll<HTMLButtonElement>("button")];
+  buttons.forEach((button, index) => button.setAttribute("aria-selected", String(index === searchSelection.index)));
+  const selected = buttons[searchSelection.index];
+  if (selected) {
+    searchInput.setAttribute("aria-activedescendant", selected.id);
+    if (scroll) selected.scrollIntoView({ block: "nearest" });
+  } else searchInput.removeAttribute("aria-activedescendant");
+}
+
+async function activateSearchResult(index?: number): Promise<void> {
+  if (!searchDialog.open || searchComposing) return;
+  if (index !== undefined) searchSelection.select(index);
+  try {
+    await searchSelection.activate(async (selected) => {
+      const result = displayedSearchResults[selected];
+      if (!result) return;
+      await closeSearch(Boolean(result.external));
+      await result.action();
+    });
+  } catch (error) { showToast(errorMessage(error), true); }
 }
 
 function renderSearchResults(): void {
   const query = searchInput.value.normalize("NFKC").trim().toLocaleLowerCase();
   const terms = query.split(/\s+/).filter(Boolean);
   searchResults.replaceChildren();
+  displayedSearchResults = [];
+  searchSelection.reset(0);
+  highlightSearchSelection();
   if (!terms.length) { element<HTMLElement>("search-status").textContent = ""; return; }
   const matches = (text: string) => terms.every((term) => text.normalize("NFKC").toLocaleLowerCase().includes(term));
-  const results: { title: string; detail: string; kind: string; action: () => void | Promise<void> }[] = [];
+  const results: WorkspaceSearchResult[] = [];
   for (const shortcut of shortcuts) if (matches(`${shortcut.name} ${shortcut.target}`)) results.push({
-    title: shortcut.name, detail: shortcut.sleeping ? "常用入口 · 睡眠中" : "常用入口", kind: "folder",
+    title: shortcut.name, detail: `${shortcut.sleeping ? "常用入口 · 睡眠中" : "常用入口"} · ${shortcut.target}`, kind: "folder", external: true,
     action: () => launch(shortcut),
   });
   for (const list of checklists) for (const task of list.tasks) if (matches(`${list.name} ${task.content}`)) results.push({
@@ -3526,10 +3733,15 @@ function renderSearchResults(): void {
     },
   });
   element<HTMLElement>("search-status").textContent = results.length ? `${results.length} 项结果${results.length > 40 ? " · 显示前 40 项，可继续细化关键词" : ""}` : "还没有找到，试试另一个关键词。";
-  for (const result of results.slice(0, 40)) {
+  displayedSearchResults = results.slice(0, 40);
+  searchSelection.reset(displayedSearchResults.length);
+  for (const [index, result] of displayedSearchResults.entries()) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "search-result";
+    button.id = `search-result-${index}`;
+    button.tabIndex = -1;
+    button.setAttribute("role", "option");
     const copy = document.createElement("span");
     const title = document.createElement("strong");
     const detail = document.createElement("small");
@@ -3537,9 +3749,11 @@ function renderSearchResults(): void {
     detail.textContent = result.detail;
     copy.append(title, detail);
     button.append(icon(result.kind), copy);
-    button.addEventListener("click", () => { searchDialog.close(); void result.action(); });
+    button.addEventListener("pointermove", () => { searchSelection.select(index); highlightSearchSelection(); });
+    button.addEventListener("click", () => { void activateSearchResult(index); });
     searchResults.append(button);
   }
+  highlightSearchSelection();
 }
 
 async function openBackupDialog(): Promise<void> {
@@ -3808,7 +4022,10 @@ async function initialize(): Promise<void> {
     invoke<DiaryEntry[]>("load_diaries"),
   ]);
 
-  if (appsResult.status === "fulfilled") shortcuts = applyWeeklySchedules(appsResult.value, new Date().getDay());
+  if (appsResult.status === "fulfilled") {
+    shortcuts = applyWeeklySchedules(appsResult.value, new Date().getDay());
+    shortcutsLoaded = true;
+  }
   else showToast(errorMessage(appsResult.reason), true);
 
   if (settingsResult.status === "fulfilled") {
@@ -3819,6 +4036,7 @@ async function initialize(): Promise<void> {
       workspaceOrder: normalizeWorkspaceOrder(settingsResult.value.workspaceOrder),
       collapsedModules: normalizeModuleSelection(settingsResult.value.collapsedModules),
       hiddenModules: normalizeModuleSelection(settingsResult.value.hiddenModules),
+      quickSearchShortcut: settingsResult.value.quickSearchShortcut ?? null,
     };
   }
   else showToast(errorMessage(settingsResult.reason), true);
@@ -3844,8 +4062,12 @@ async function initialize(): Promise<void> {
   renderChecklists();
   renderDiaries();
   renderStartupSetting();
+  void appWindow.onDragDropEvent(({ payload }) => { void shortcutDrop.handle(payload); })
+    .then((unlisten) => { unlistenShortcutDrop = unlisten; })
+    .catch(() => showToast("拖入添加暂不可用，请使用“浏览…”选择。", true));
   requestAnimationFrame(() => scratchpadEditor.restoreView());
   renderThemeSetting();
+  await quickSearchSettings.initialize().catch((error) => showToast(errorMessage(error), true));
   if (checklistResetNeeded) await persistChecklistChanges(checklistsBeforeReset);
   scheduleChecklistReset();
   if (!settings.hasCompletedWelcome) await openWelcomeOnce();
@@ -3861,15 +4083,28 @@ editButton.addEventListener("click", () => {
   render();
 });
 element<HTMLButtonElement>("search-button").addEventListener("click", openSearch);
-element<HTMLButtonElement>("search-close-button").addEventListener("click", () => searchDialog.close());
+element<HTMLButtonElement>("search-close-button").addEventListener("click", () => { void closeSearch(); });
+searchDialog.addEventListener("cancel", (event) => { event.preventDefault(); void closeSearch(); });
+searchInput.addEventListener("compositionstart", () => { searchComposing = true; });
+searchInput.addEventListener("compositionend", () => { searchComposing = false; });
 searchInput.addEventListener("input", renderSearchResults);
 searchDialog.addEventListener("keydown", (event) => {
-  if (event.isComposing) return;
-  const buttons = [...searchResults.querySelectorAll<HTMLButtonElement>("button")];
-  const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-  if (event.key === "ArrowDown") { event.preventDefault(); buttons[Math.min(index + 1, buttons.length - 1)]?.focus(); }
-  if (event.key === "ArrowUp") { event.preventDefault(); if (index <= 0) searchInput.focus(); else buttons[index - 1]?.focus(); }
-  if (event.key === "Enter" && document.activeElement === searchInput) { event.preventDefault(); buttons[0]?.click(); }
+  if (event.isComposing || searchComposing || event.keyCode === 229) return;
+  if (document.activeElement !== searchInput && !searchResults.contains(document.activeElement)) return;
+  if (event.key === "Enter") event.preventDefault();
+  const action = searchNavigationKey(event);
+  if (action === "down" || action === "up") {
+    event.preventDefault();
+    searchSelection.move(action === "down" ? 1 : -1);
+    searchInput.focus();
+    highlightSearchSelection(true);
+  }
+  if (action === "open") { void activateSearchResult(); }
+});
+quickSearchSettingButton.addEventListener("click", () => {
+  const opening = !quickSearchEditor.classList.contains("is-open");
+  closeOtherSettingsEditors("quick-search");
+  setSettingsEditor(quickSearchSettingButton, quickSearchEditor, opening);
 });
 element<HTMLButtonElement>("checklist-focus-close").addEventListener("click", closeChecklistFocus);
 checklistFocusDialog.addEventListener("cancel", (event) => { event.preventDefault(); closeChecklistFocus(); });
@@ -4074,20 +4309,27 @@ scheduleForm.addEventListener("submit", (event) => {
 });
 anniversaryPlant.addEventListener("click", playPlantBloom);
 document.addEventListener("keydown", (event) => {
+  shortcutDrop.cancel();
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-    event.preventDefault(); openSearch(); return;
+    event.preventDefault();
+    if (!event.repeat && !event.isComposing) openSearch();
+    return;
   }
   if (document.querySelector("dialog[open]")) return;
   if (event.key === "Escape" && welcomeOpen) completeWelcome(false);
   else if (event.key === "Escape" && settingsPanel.classList.contains("is-open")) closeSettings();
   else if (event.key === "Escape" && guideView.classList.contains("is-open")) closeGuide();
 });
+document.addEventListener("pointerdown", () => shortcutDrop.cancel(), true);
 window.addEventListener("focus", () => {
   scheduleGreetingUpdate();
   scheduleDailyQuoteUpdate();
   void refreshDailyChecklists();
 });
 window.addEventListener("beforeunload", () => {
+  quickSearchSettings.dispose();
+  shortcutDrop.dispose();
+  unlistenShortcutDrop?.();
   window.clearInterval(runningPollTimer);
   window.clearTimeout(greetingTimer);
   window.clearTimeout(dailyQuoteTimer);

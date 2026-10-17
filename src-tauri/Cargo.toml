@@ -21,6 +21,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-global-shortcut = "=2.3.1"
 windows = { version = "0.61", features = [
   "ApplicationModel",
   "ApplicationModel_Core",

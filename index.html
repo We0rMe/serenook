@@ -48,6 +48,7 @@
               </button>
               <button id="shortcuts-module-toggle" class="workspace-module-toggle" type="button" aria-expanded="true">
                 <strong id="shortcuts-module-title" class="workspace-module-title">常用入口</strong>
+                <span id="shortcut-drop-hint" class="shortcut-drop-hint" role="status" hidden></span>
                 <span class="workspace-module-chevron" data-icon="chevron" aria-hidden="true"></span>
               </button>
             </header>
@@ -63,9 +64,9 @@
                       <span class="button-icon" data-icon="calendar" aria-hidden="true"></span>
                       <span class="schedule-label">作息</span>
                     </button>
-                    <button id="edit-button" class="edit-button" type="button" aria-pressed="false">
+                    <button id="edit-button" class="edit-button icon-only-button" type="button" aria-label="编辑入口" title="编辑入口" aria-pressed="false">
                       <span class="button-icon" data-icon="edit" aria-hidden="true"></span>
-                      <span class="edit-label">编辑</span>
+                      <span class="edit-label sr-only">编辑</span>
                     </button>
                   </div>
                 </div>
@@ -108,10 +109,9 @@
             <div id="checklists-module-content" class="workspace-module-content is-open" aria-hidden="false">
               <div class="workspace-module-content-inner">
                 <div class="checklist-workspace-heading">
-                  <button id="stored-checklist-button" class="text-action" type="button" aria-label="查看已收存的清单">已收存</button>
-                  <button id="add-checklist-button" class="section-add-button" type="button">
+                  <button id="stored-checklist-button" class="icon-only-button" type="button" aria-label="查看已收存的清单" title="已收存"><span data-icon="archive" aria-hidden="true"></span></button>
+                  <button id="add-checklist-button" class="icon-only-button" type="button" aria-label="添加清单" title="添加清单">
                     <span data-icon="plus" aria-hidden="true"></span>
-                    <span>添加清单</span>
                   </button>
                 </div>
                 <div id="checklist-grid" class="checklist-grid" aria-label="我的清单"></div>
@@ -142,9 +142,8 @@
                     <select id="diary-month-select" aria-label="浏览月份"></select>
                     <button id="diary-month-next" class="quiet-icon-button" type="button" aria-label="下一个月"><span data-icon="arrow" aria-hidden="true"></span></button>
                   </div>
-                  <button id="add-diary-button" class="section-add-button" type="button">
+                  <button id="add-diary-button" class="icon-only-button" type="button" aria-label="记录此刻" title="记录此刻">
                     <span data-icon="plus" aria-hidden="true"></span>
-                    <span>记录此刻</span>
                   </button>
                 </div>
                 <button id="diary-draft-resume" class="text-action diary-draft-resume" type="button" hidden>继续未写完的一页</button>
@@ -327,6 +326,27 @@
               </div>
             </div>
           </div>
+          <button id="quick-search-setting-button" class="setting-item" type="button" aria-expanded="false" aria-controls="quick-search-editor">
+            <span class="setting-item-icon" data-icon="search" aria-hidden="true"></span>
+            <span class="setting-item-copy"><strong>快捷唤起</strong></span>
+            <span class="setting-item-chevron" data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <div id="quick-search-editor" class="setting-editor" aria-hidden="true" inert>
+            <div class="setting-editor-inner">
+              <div class="startup-panel quick-search-panel">
+                <button id="quick-search-toggle" class="startup-toggle" type="button" aria-pressed="false">
+                  <span><strong>全局唤起搜索</strong></span>
+                  <span class="setting-switch" aria-hidden="true"><span class="setting-switch-knob"></span></span>
+                </button>
+                <div class="quick-search-key-row">
+                  <input id="quick-search-key" type="text" readonly aria-label="唤醒快捷键，点击后按下新组合" title="点击后按下新快捷键，Esc 取消" />
+                  <button id="quick-search-apply" class="quiet-icon-button" type="button" title="应用快捷键" aria-label="应用快捷键"><span data-icon="check" aria-hidden="true"></span></button>
+                </div>
+                <p class="field-hint">运行或最小化时可唤起，退出后停止。若与常用操作重复，可点击上方按键更换。</p>
+                <p id="quick-search-status" class="form-error" role="status" hidden></p>
+              </div>
+            </div>
+          </div>
           <button id="anniversary-setting-button" class="setting-item" type="button" aria-expanded="false">
             <span class="setting-item-icon" data-icon="flower" aria-hidden="true"></span>
             <span class="setting-item-copy">
@@ -410,7 +430,7 @@
               <span class="guide-number">01</span>
               <div>
                 <h3>一处安静的工作台</h3>
-                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。轻点分区标题收起内容，拖动左侧把手调整顺序。在设置的“工作台”中选择显示哪些分区，隐藏不会删除内容。使用左上角查找或 Ctrl+K，可以找到入口、任务、日记与随手记；跳转时会打开对应分区并定位匹配文字。</p>
+                <p>Serenook 来自 <em>serene</em> 与 <em>nook</em>。轻点分区标题收起内容，拖动左侧把手调整顺序。设置中的“工作台”可选择显示分区，隐藏不会删除内容。左上角查找或 Ctrl+K 可找到入口、任务、日记与随手记；上下键选择，回车只打开高亮的一项。开启“快捷唤起”后，运行或最小化时也可从其他应用唤起搜索，Esc 返回；快捷键可自行更换。</p>
               </div>
             </article>
 
@@ -418,7 +438,7 @@
               <span class="guide-number">02</span>
               <div>
                 <h3>常用入口</h3>
-                <p>进入“编辑”后，可添加应用、文档、文件夹或网址，也可拖动卡片调整顺序。应用较多时，可从设置批量选择本机已安装的应用，统一放入睡眠区。“全开”会避开睡眠中与已运行的应用。本地目标移走后，可重新定位并保留原有设置。</p>
+                <p>将应用、快捷方式、文档或文件夹拖入“常用入口”，确认名称后即可添加；拖到睡眠区则默认睡眠。进入“编辑”也可添加入口、网址或调整卡片顺序。应用较多时，可从设置批量导入本机应用。“全开”会避开睡眠中与已运行的应用。本地目标移走后，可重新定位并保留原有设置。</p>
               </div>
             </article>
 
@@ -426,7 +446,7 @@
               <span class="guide-number">03</span>
               <div>
                 <h3>清单</h3>
-                <p>铅笔用来编辑、排序和关联入口，星光标记重要任务。点击名称可展开清单，已完成内容可单独收起。暂告一段落时可以收存，随后从“已收存”查看或恢复；收存期间暂停每日重置。</p>
+                <p>底部加号可直接添加任务，Enter 连续添加，Esc 收起输入。铅笔用来编辑、排序和关联入口，星光标记重要任务。点击名称可展开清单，已完成内容可单独收起。暂告一段落时可以收存，随后从收存图标查看或恢复；收存期间暂停每日重置。</p>
               </div>
             </article>
 
@@ -510,10 +530,6 @@
           <label class="kind-option">
             <input type="radio" name="shortcut-kind" value="folder" />
             <span>本地文件夹</span>
-          </label>
-          <label id="installed-app-kind-option" class="kind-option" hidden>
-            <input type="radio" name="shortcut-kind" value="app" />
-            <span>已安装应用</span>
           </label>
         </fieldset>
 
@@ -672,9 +688,9 @@
         </header>
         <div id="diary-reader-content" class="diary-reader-content"></div>
         <nav class="reader-navigation" aria-label="日记翻阅">
-          <button id="diary-reader-previous" class="text-action" type="button">上一篇</button>
-          <button id="diary-export-button" class="text-action" type="button">导出这一页</button>
-          <button id="diary-reader-next" class="text-action" type="button">下一篇</button>
+          <button id="diary-reader-previous" class="icon-only-button" type="button" aria-label="上一篇" title="上一篇"><span data-icon="back" aria-hidden="true"></span></button>
+          <button id="diary-export-button" class="icon-only-button" type="button" aria-label="导出这一页" title="导出这一页"><span data-icon="download" aria-hidden="true"></span></button>
+          <button id="diary-reader-next" class="icon-only-button" type="button" aria-label="下一篇" title="下一篇"><span data-icon="arrow" aria-hidden="true"></span></button>
         </nav>
       </article>
     </dialog>
@@ -695,11 +711,11 @@
 
     <dialog id="search-dialog" class="shortcut-dialog search-dialog" aria-label="查找工作台内容">
       <div class="search-bar">
-        <input id="search-input" type="search" placeholder="查找入口、任务、日记或随手记" autocomplete="off" aria-label="查找内容" aria-controls="search-results" />
+        <input id="search-input" type="search" placeholder="查找入口、任务、日记或随手记" autocomplete="off" aria-label="查找内容" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-results" />
         <button id="search-close-button" class="dialog-close-button" type="button" aria-label="关闭查找"><span data-icon="close" aria-hidden="true"></span></button>
       </div>
       <p id="search-status" class="field-hint" role="status"></p>
-      <div id="search-results" class="search-results"></div>
+      <div id="search-results" class="search-results" role="listbox" aria-label="检索结果"></div>
     </dialog>
 
     <dialog id="checklist-focus-dialog" class="shortcut-dialog checklist-focus-dialog" aria-label="展开清单">

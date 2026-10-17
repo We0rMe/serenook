@@ -21,6 +21,7 @@
         "center": true,
         "decorations": false,
         "resizable": true,
+        "dragDropEnabled": true,
         "shadow": true
       }
     ],

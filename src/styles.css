@@ -454,6 +454,41 @@ body.is-reordering * {
   transition: grid-template-rows 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease;
 }
 
+.shortcut-drop-hint {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.shortcut-drop-hint[hidden] {
+  display: none;
+}
+
+#shortcuts-module,
+#sleep-section {
+  position: relative;
+}
+
+#shortcuts-module::after,
+#sleep-section::after {
+  content: "";
+  position: absolute;
+  inset: -1px -7px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 65%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+#shortcuts-module.is-file-drop-target::after,
+#sleep-section.is-file-drop-target::after {
+  opacity: 1;
+}
+
 .workspace-module-content.is-open {
   grid-template-rows: 1fr;
   opacity: 1;
@@ -1999,7 +2034,7 @@ body.is-reordering * {
   max-width: min(440px, 46vw);
   padding-bottom: 3px;
   font-family: "Serenook Hand", "KaiTi", "STKaiti", serif;
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 400;
   letter-spacing: 0;
   color: var(--muted);
@@ -2197,8 +2232,8 @@ body.is-reordering * {
   border: 0;
 }
 
-.shortcut-kind-selector.is-installed {
-  grid-template-columns: 1fr;
+.shortcut-kind-selector[hidden] {
+  display: none;
 }
 
 .shortcut-kind-selector legend {
@@ -3445,6 +3480,8 @@ body.is-reordering * {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #shortcuts-module::after,
+  #sleep-section::after,
   .shortcut-card,
   .workspace-module,
   .workspace-module-content,
