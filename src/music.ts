@@ -79,6 +79,8 @@ export class MusicCompanion {
   private seeking = false;
   private minimized = false;
   private retryAt = 0;
+  private fallbackCover: string | null = null;
+  private displayedLyrics: Lyrics | null = null;
   private reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   constructor(private root: HTMLElement, private active: () => boolean) {
@@ -195,24 +197,25 @@ export class MusicCompanion {
     const source = s.sources.find(source => source.id === s.selected);
     this.root.querySelector(".music-state")!.textContent = source
       ? mediaSourceName(source.appId) : "";
-    (this.root.querySelector(".music-state") as HTMLElement).title = s.compatibility ? "网易云兼容模式 · 封面与播放模式暂未开放" : "";
-    if (s.cover && this.cover.getAttribute("src") !== s.cover) { this.cover.src = s.cover; this.cover.hidden = false; }
-    if (!s.cover) { this.cover.hidden = true; this.cover.removeAttribute("src"); this.root.style.removeProperty("--music-tint"); }
+    (this.root.querySelector(".music-state") as HTMLElement).title = s.compatibility ? "网易云兼容模式" : "";
     const key = s.selected && s.title ? songKey(s.title, s.artist) : "";
     const changed = key !== this.track;
+    if (changed) { this.fallbackCover = null; this.displayedLyrics = null; }
+    this.renderCover();
     this.position = s.position ?? null; this.received = performance.now();
     this.progress.max = String(s.duration || 100);
     this.progress.disabled = !s.canSeek || !s.duration || this.busy;
     this.progress.title = "享受此刻";
     this.rematchButton.disabled = this.rematching || this.busy;
-    const lyricContext = `${key}|${Math.round(s.duration ?? 0)}|${s.position != null}`;
+    const lyricContext = `${key}|${Math.round(s.duration ?? 0)}`;
     if (changed || lyricContext !== this.lyricContext || this.forceLyrics) {
       this.lyricContext = lyricContext;
       this.track = key; this.seeking = false;
       if (changed && !this.reduceMotion.matches) this.root.querySelector(".music-main")!.animate([{ opacity: .3 }, { opacity: 1 }], { duration: 420, easing: "ease-out" });
       const force = this.forceLyrics; this.forceLyrics = false;
       void this.loadLyrics(force);
-    } else if (this.retryAt && Date.now() >= this.retryAt) { void this.loadLyrics(); }
+    } else if (this.retryAt && Date.now() >= this.retryAt) { void this.loadLyrics(true); }
+    else if (this.displayedLyrics && this.lines.length && this.lyricView.classList.contains("is-synced") !== (s.position != null)) this.displayLyrics(this.displayedLyrics);
     this.activity(); this.tick();
     this.controls.hidden = !s.selected;
     this.buttons.get("previous")!.disabled = this.busy || !s.canPrevious;
@@ -239,7 +242,18 @@ export class MusicCompanion {
     this.root.classList.toggle("is-flowing", !!this.snapshot?.playing && this.active() && !document.hidden && !this.minimized);
   }
 
-  private cacheKey(): string { return `v2:${this.track}:${this.snapshot?.album ?? ""}:${Math.round(this.snapshot?.duration ?? 0)}`; }
+  private cacheKey(): string { return `v3:${this.track}:${this.snapshot?.album ?? ""}:${Math.round(this.snapshot?.duration ?? 0)}`; }
+
+  private renderCover(): void {
+    const cover = this.snapshot?.cover || this.fallbackCover;
+    if (cover) {
+      if (this.cover.getAttribute("src") !== cover) this.cover.src = cover;
+      this.cover.hidden = false;
+    } else {
+      this.cover.hidden = true; this.cover.removeAttribute("src");
+      this.root.style.removeProperty("--music-tint");
+    }
+  }
 
   private finishRematch(): void {
     this.rematching = false; this.forceLyrics = false;
@@ -259,16 +273,18 @@ export class MusicCompanion {
     const current = this.snapshot;
     if (!current?.selected || !current.title) { this.showLyricMessage(""); this.finishRematch(); return; }
     const key = this.track, cacheKey = this.cacheKey();
-    const cached = force ? undefined : this.lyrics.get(cacheKey) ?? this.lyrics.get(key);
+    // Preserve explicit old local imports, but re-match legacy online caches.
+    const legacy = this.lyrics.get(key);
+    const cached = force ? undefined : this.lyrics.get(cacheKey) ?? (legacy?.local ? legacy : undefined);
     if (cached) { this.displayLyrics(cached.data); this.finishRematch(); return; }
     if (!this.online) { this.showLyricMessage("在线歌词已关闭"); return; }
     this.showLyricMessage("正在寻找这首歌的文字…");
     let timeout = 0;
     try {
       const request = invoke<Lyrics | null>("music_lyrics", { title: current.title, artist: current.artist, album: current.album || "", duration: current.duration ?? null });
-      const lyrics = await Promise.race([request, new Promise<never>((_, reject) => { timeout = window.setTimeout(() => reject(new Error("Lyrics timeout")), 16000); })]);
+      const lyrics = await Promise.race([request, new Promise<never>((_, reject) => { timeout = window.setTimeout(() => reject(new Error("Lyrics timeout")), 22000); })]);
       if (generation !== this.lyricGeneration || key !== this.track) return;
-      if (!lyrics) { this.showLyricMessage("暂无匹配歌词"); return; }
+      if (!lyrics) { this.showLyricMessage("暂无匹配歌词"); this.retryAt = Date.now() + 5 * 60_000; return; }
       try { this.lyrics.put(cacheKey, lyrics, false); } catch { /* rendering remains available if storage is full */ }
       this.displayLyrics(lyrics);
     } catch {
@@ -279,6 +295,9 @@ export class MusicCompanion {
   }
 
   private displayLyrics(data: Lyrics): void {
+    this.displayedLyrics = data;
+    this.fallbackCover = data.cover ?? null;
+    this.renderCover();
     this.showLyricMessage(data.instrumental ? "纯音乐，让旋律继续。" : "暂无匹配歌词");
     this.lines = typeof data.syncedLyrics === "string" ? parseLrc(data.syncedLyrics).slice(0, 1500) : [];
     const synced = this.lines.length > 0 && this.snapshot?.position != null;
@@ -289,13 +308,18 @@ export class MusicCompanion {
         const p = document.createElement("p"); p.className = "music-lyric-line";
         if (synced && text) {
           this.words[i] = lyricWords(this.lines[i], this.lines[i + 1]?.at, this.snapshot?.duration);
-          this.wordElements[i] = this.words[i].map(word => { const span = document.createElement("span"); span.className = "music-word"; span.textContent = word.text; p.append(span); return span; });
+          this.wordElements[i] = this.words[i].map(word => {
+            const span = document.createElement("span");
+            span.className = `music-word${/^\s+$/u.test(word.text) ? " is-space" : ""}`;
+            span.textContent = word.text; p.append(span); return span;
+          });
         } else p.textContent = text || "· · ·";
         return p;
       });
       this.lyricView.replaceChildren(...this.lineElements);
     }
     this.tick();
+    if (!this.lines.length && !data.instrumental) this.retryAt = Date.now() + 5 * 60_000;
   }
 
   private tick(): void {

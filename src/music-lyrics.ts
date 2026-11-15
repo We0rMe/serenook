@@ -1,13 +1,13 @@
 export interface LyricWord { text: string; at: number; end: number }
 export interface LyricLine { at: number; text: string; words?: { text: string; at: number }[] }
-export interface Lyrics { plainLyrics?: string | null; syncedLyrics?: string | null; instrumental?: boolean }
+export interface Lyrics { plainLyrics?: string | null; syncedLyrics?: string | null; instrumental?: boolean; cover?: string | null }
 
 export function parseLrc(text: string): LyricLine[] {
   const lines: LyricLine[] = [];
   const offset = Number(text.match(/\[offset:([+-]?\d+)\]/i)?.[1] ?? 0) / 1000;
   for (const raw of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
     const times = [...raw.matchAll(/\[(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?\]/g)];
-    const content = raw.replace(/\[[^\]]*\]/g, "").trim();
+    const content = raw.replace(/\[(?:\d{1,3}:[0-5]\d(?:[.:]\d{1,3})?|(?:ar|al|ti|au|by|offset|length|re|ve):[^\]]*)\]/gi, "").trim();
     const wordTags = [...content.matchAll(/<(\d{1,3}):([0-5]\d)(?:[.:](\d{1,3}))?>([^<]*)/g)];
     const words = wordTags.map(t => ({ at: Math.max(0, Number(t[1]) * 60 + Number(t[2]) + Number(`0.${t[3] ?? 0}`) - offset), text: t[4] }));
     for (const t of times) {
@@ -66,7 +66,8 @@ export class LyricStore {
   get(key: string): { data: Lyrics; local: boolean } | undefined {
     const value = this.read()[key];
     if (!value?.data || typeof value.local !== "boolean") return;
-    if (!value.local && Date.now() - value.saved > 30 * 86400000) return;
+    const hasTimed = !!value.data.syncedLyrics?.trim();
+    if (!value.local && Date.now() - value.saved > (hasTimed ? 30 * 86400000 : 15 * 60_000)) return;
     return value;
   }
   put(key: string, data: Lyrics, local: boolean): void {

@@ -92,6 +92,12 @@ const state = { sources: [{id:'1',appId:'QQMusic.exe'}, {id:'2',appId:'Spotify.e
   assert.equal(rematchRequest.command, 'music_lyrics', 'refresh must bypass cached lyrics');
   rematchRequest.resolve({syncedLyrics:'[00:01.00]Rematched song'}); await rematch;
   assert.equal(music.lines[0].text, 'Rematched song');
+  music.displayLyrics({syncedLyrics:'[00:01]Fallback cover',cover:'data:image/png;base64,TEST'});
+  assert.equal(music.fallbackCover, 'data:image/png;base64,TEST');
+  assert.equal(music.cover.hidden, false, 'missing player cover uses matched catalog art');
+  music.render({...state,title:'New without cover',duration:180,position:20});
+  assert.equal(music.fallbackCover, null, 'changing song clears old catalog art immediately');
+  pending.shift().resolve(null); await flush();
   music.snapshot = {...state,duration:180,position:20,canSeek:true}; music.position = 20;
   const seeking = music.seek(999); const seekRequest = pending.shift();
   assert.equal(seekRequest.command, 'media_seek'); assert.equal(seekRequest.args.seconds, 180);

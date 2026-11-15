@@ -5,6 +5,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { dailyQuote } from "./daily-quotes";
+import { ordinaryGreeting } from "./greetings";
+import { watchCalendarDay } from "./calendar-refresh";
 import { holidayForDate, holidayGreeting } from "./holiday-greetings";
 import { ScratchpadEditor } from "./scratchpad";
 import { ScratchpadTaskComposer, taskDestinationError } from "./scratchpad-task";
@@ -353,6 +355,7 @@ let runningDetectionInFlight = false;
 let runningPollTimer: number | undefined;
 let greetingTimer: number | undefined;
 let dailyQuoteTimer: number | undefined;
+let stopCalendarWatch: (() => void) | undefined;
 let checklistResetTimer: number | undefined;
 let toastTimer: number | undefined;
 let welcomeOpen = false;
@@ -808,30 +811,7 @@ function updateGreeting(now = new Date()): void {
     setGreeting(anniversaryGreeting);
     return;
   }
-  const weekdayGreetings = [
-    "周日安好，宜感受自然。",
-    "新的一周，稳稳开始。",
-    "周二好，沿着节奏继续。",
-    "周三好，已经走到一周中间。",
-    "周四好，再向前一点。",
-    "周五快乐！",
-    "周六好，做一点想做的事。",
-  ];
-  const minutes = now.getHours() * 60 + now.getMinutes();
-  const greeting = minutes < 6 * 60
-    ? "夜深了，让今天轻轻落下。"
-    : minutes < 9 * 60 + 30
-      ? weekdayGreetings[now.getDay()]
-      : minutes < 11 * 60 + 30
-        ? "上午好，拾起一件小事。"
-        : minutes < 13 * 60 + 30
-          ? "中午好，宜小憩~"
-          : minutes < 17 * 60 + 30
-            ? "下午好，安静地继续。"
-            : minutes < 20 * 60 + 30
-              ? "傍晚好，把余光留给从容。"
-              : "晚上好，做完便好好休息。";
-  setGreeting(greeting);
+  setGreeting(ordinaryGreeting(now));
 }
 
 function scheduleGreetingUpdate(now = new Date()): void {
@@ -4058,6 +4038,13 @@ async function initialize(): Promise<void> {
   applyWorkspaceOrder();
   scheduleGreetingUpdate();
   scheduleDailyQuoteUpdate();
+  stopCalendarWatch = watchCalendarDay((now) => {
+    const message = anniversaryMessage();
+    if (message && footerName.textContent !== message) placeFooterMessage(message, false);
+    scheduleGreetingUpdate(now);
+    scheduleDailyQuoteUpdate(now);
+    void refreshDailyChecklists();
+  });
   render();
   renderChecklists();
   renderDiaries();
@@ -4327,6 +4314,7 @@ window.addEventListener("focus", () => {
   void refreshDailyChecklists();
 });
 window.addEventListener("beforeunload", () => {
+  stopCalendarWatch?.();
   quickSearchSettings.dispose();
   shortcutDrop.dispose();
   unlistenShortcutDrop?.();

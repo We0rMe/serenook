@@ -8,6 +8,8 @@ vm.createContext(context);
 vm.runInContext(ts.transpileModule(fs.readFileSync('src/music-lyrics.ts','utf8'), {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText, context);
 const {parseLrc, lyricIndex, musicTime, LyricStore} = context.exports;
 const {lyricWords, wordProgress} = context.exports;
+assert.equal(parseLrc('[00:02]Don’t stop [Chorus]')[0].text, 'Don’t stop [Chorus]');
+assert.equal(lyricWords({at:0,text:"Don't forget me"}, 6).map(w=>w.text).join(''), "Don't forget me");
 const enhanced = parseLrc('[offset:100]\n[00:01.00]<00:01.00>开<00:02.00>始<00:03.00>')[0];
 const words = lyricWords(enhanced, 4);
 assert.equal(enhanced.text, '开始'); assert.equal(words.length, 2);

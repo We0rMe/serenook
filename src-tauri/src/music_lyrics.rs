@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
 use windows::Win32::{
@@ -22,6 +23,10 @@ pub struct Lyrics {
     instrumental: bool,
     plain_lyrics: Option<String>,
     synced_lyrics: Option<String>,
+    #[serde(default)]
+    cover: Option<String>,
+    #[serde(default, skip_serializing)]
+    id: u64,
 }
 
 fn chinese(text: &str, flags: u32) -> String {
@@ -67,9 +72,60 @@ fn normalized(text: &str) -> String {
         .collect()
 }
 fn matches(row: &Lyrics, title: &str, artist: &str, duration: Option<f64>) -> bool {
-    normalized(&row.track_name) == normalized(title)
-        && normalized(&row.artist_name) == normalized(artist)
+    normalized(&search_title(&row.track_name)) == normalized(&search_title(title))
+        && artist_matches(&row.artist_name, artist)
         && duration.is_none_or(|d| (row.duration - d).abs() <= 3.0)
+}
+
+// Remove presentation/quality labels, never recording distinctions such as
+// Live, Remix, Acoustic, sped-up or cover versions.
+fn search_title(title: &str) -> String {
+    let mut title = title.trim().to_owned();
+    for label in [
+        " (Explicit)",
+        " [Explicit]",
+        " [HQ]",
+        " [SQ]",
+        " [无损]",
+        "（无损）",
+        " (Album Version)",
+    ] {
+        if title.to_lowercase().ends_with(&label.to_lowercase()) {
+            title.truncate(title.len() - label.len());
+        }
+    }
+    if let Some((main, suffix)) = title.rsplit_once(" - ") {
+        if ["电影", "电视剧", "主题曲", "插曲"]
+            .iter()
+            .any(|word| suffix.contains(word))
+        {
+            title = main.trim().into();
+        }
+    }
+    title
+}
+
+fn artist_matches(left: &str, right: &str) -> bool {
+    if normalized(left) == normalized(right) {
+        return true;
+    }
+    let names = |text: &str| {
+        let text = text
+            .to_lowercase()
+            .replace(" feat. ", "/")
+            .replace(" featuring ", "/");
+        let mut names: Vec<_> = text
+            .split(['/', '&', '、', ',', ';', '，', '；'])
+            .map(normalized)
+            .filter(|s| !s.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+    let a = names(left);
+    let b = names(right);
+    !a.is_empty() && a == b
 }
 
 async fn json(response: reqwest::Response) -> Result<serde_json::Value, String> {
@@ -157,8 +213,7 @@ fn select_lyrics(
     rows.into_iter().next()
 }
 
-#[tauri::command]
-pub async fn music_lyrics(
+async fn lrclib_lyrics(
     title: String,
     artist: String,
     album: String,
@@ -180,7 +235,7 @@ pub async fn music_lyrics(
         .timeout(Duration::from_secs(6))
         .connect_timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent("Serenook/0.15.0 (desktop lyrics companion)")
+        .user_agent("Serenook/0.16.0 (desktop lyrics companion)")
         .build()
         .map_err(|_| "歌词服务暂不可用。")?;
     // Search both scripts when necessary; artist matching remains exact locally.
@@ -242,6 +297,181 @@ pub async fn music_lyrics(
     Ok(result)
 }
 
+fn client() -> Result<reqwest::Client, String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("Serenook/0.16.0 (desktop music companion)")
+        .build()
+        .map_err(|_| "音乐信息暂不可用。".into())
+}
+
+async fn get_json(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+) -> Result<serde_json::Value, String> {
+    json(
+        client
+            .get(url)
+            .send()
+            .await
+            .map_err(|_| "音乐信息暂不可用。")?,
+    )
+    .await
+}
+
+fn catalog_rows(value: &serde_json::Value) -> Vec<Lyrics> {
+    value
+        .pointer("/result/songs")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|song| {
+            let artists = song
+                .get("artists")?
+                .as_array()?
+                .iter()
+                .filter_map(|a| a.get("name")?.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ");
+            Some(Lyrics {
+                id: song.get("id")?.as_u64()?,
+                track_name: song.get("name")?.as_str()?.into(),
+                artist_name: artists,
+                album_name: song
+                    .pointer("/album/name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .into(),
+                duration: song.get("duration")?.as_f64()? / 1000.0,
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+async fn cover_data(client: &reqwest::Client, url: &str) -> Option<String> {
+    let mut url = reqwest::Url::parse(url).ok()?;
+    // Only fetch the catalog's image CDN, never arbitrary URLs from metadata.
+    let host = url.host_str()?;
+    if !host.ends_with(".music.126.net") {
+        return None;
+    }
+    url.set_scheme("https").ok()?;
+    url.query_pairs_mut().append_pair("param", "300y300");
+    let mut response = client.get(url).send().await.ok()?.error_for_status().ok()?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if bytes.len() + chunk.len() > 1024 * 1024 {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let mime = if bytes.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg"
+    } else if bytes.starts_with(b"\x89PNG") {
+        "image/png"
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        "image/webp"
+    } else {
+        return None;
+    };
+    Some(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
+}
+
+async fn catalog_lyrics(
+    title: &str,
+    artist: &str,
+    album: &str,
+    duration: Option<f64>,
+) -> Result<Option<Lyrics>, String> {
+    let client = client()?;
+    let mut url = reqwest::Url::parse("https://music.163.com/api/search/get/web").unwrap();
+    url.query_pairs_mut()
+        .append_pair("s", &format!("{title} {artist}"))
+        .append_pair("type", "1")
+        .append_pair("limit", "30");
+    let rows = catalog_rows(&get_json(&client, url).await?);
+    let Some(mut row) = select_lyrics(rows, title, artist, album, duration) else {
+        return Ok(None);
+    };
+    let mut detail = reqwest::Url::parse("https://music.163.com/api/song/detail/").unwrap();
+    detail
+        .query_pairs_mut()
+        .append_pair("ids", &format!("[{}]", row.id));
+    let cover_task = {
+        let client = client.clone();
+        tauri::async_runtime::spawn(async move {
+            let metadata = get_json(&client, detail).await.ok()?;
+            let url = metadata.pointer("/songs/0/album/picUrl")?.as_str()?;
+            cover_data(&client, url).await
+        })
+    };
+    let mut url = reqwest::Url::parse("https://music.163.com/api/song/lyric").unwrap();
+    url.query_pairs_mut()
+        .append_pair("id", &row.id.to_string())
+        .append_pair("lv", "-1")
+        .append_pair("tv", "-1");
+    if let Ok(data) = get_json(&client, url).await {
+        row.synced_lyrics = data
+            .pointer("/lrc/lyric")
+            .and_then(|v| v.as_str())
+            .filter(|s| s.contains('[') && !s.trim().is_empty())
+            .map(str::to_owned);
+    }
+    row.cover = cover_task.await.ok().flatten();
+    Ok(Some(row))
+}
+
+#[tauri::command]
+pub async fn music_lyrics(
+    title: String,
+    artist: String,
+    album: String,
+    duration: Option<f64>,
+) -> Result<Option<Lyrics>, String> {
+    if title.trim().is_empty()
+        || artist.trim().is_empty()
+        || title.len() > 512
+        || artist.len() > 512
+        || album.len() > 512
+    {
+        return Ok(None);
+    }
+    let duration = duration.filter(|v| v.is_finite() && *v > 0.0);
+    let title = search_title(&title);
+    let lrclib = tauri::async_runtime::spawn(lrclib_lyrics(
+        title.clone(),
+        artist.clone(),
+        album.clone(),
+        duration,
+    ));
+    let catalog = catalog_lyrics(&title, &artist, &album, duration).await;
+    let library = lrclib
+        .await
+        .map_err(|_| "歌词服务暂不可用。".to_owned())
+        .and_then(|r| r);
+    let timed = |row: &Lyrics| {
+        row.synced_lyrics
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty())
+    };
+    match (library, catalog) {
+        (Ok(Some(mut library)), Ok(Some(catalog))) => {
+            if !timed(&library) && timed(&catalog) {
+                return Ok(Some(catalog));
+            }
+            library.cover = catalog.cover;
+            Ok(Some(library))
+        }
+        (Ok(Some(row)), _) | (_, Ok(Some(row))) => Ok(Some(row)),
+        (Ok(None), Ok(None)) => Ok(None),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
+}
+
 #[tauri::command]
 pub async fn music_import_lyrics(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -285,6 +515,49 @@ pub async fn music_import_lyrics(path: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn collaboration_and_catalog_metadata() {
+        assert_eq!(search_title("Test [HQ]"), "Test");
+        assert_eq!(search_title("Test - 电影主题曲"), "Test");
+        assert_eq!(search_title("Test (Live)"), "Test (Live)");
+        assert!(artist_matches("Artist A / Artist B", "Artist B; Artist A"));
+        assert!(!artist_matches("Artist A", "Artist B"));
+        assert!(!artist_matches("Artist A", "Artist A / Artist B"));
+        let rows = catalog_rows(&serde_json::json!({"result":{"songs":[{
+            "id":123,"name":"Test","artists":[{"name":"A"},{"name":"B"}],
+            "album":{"name":"Album"},"duration":180000
+        }]}}));
+        assert_eq!(rows.len(), 1);
+        assert!(matches(&rows[0], "Test", "B & A", Some(181.0)));
+        assert!(!matches(&rows[0], "Test (Live)", "A/B", Some(180.0)));
+        assert!(!matches(&rows[0], "Test", "A/B", Some(240.0)));
+    }
+    #[test]
+    #[ignore = "Queries public sample song metadata without changing playback"]
+    fn supplemental_metadata_probe() {
+        for (title, artist, duration) in [
+            ("人来人往", "陈奕迅", 233.0),
+            ("Until I Found You", "Stephen Sanchez", 177.0),
+        ] {
+            let row = tauri::async_runtime::block_on(music_lyrics(
+                title.into(),
+                artist.into(),
+                String::new(),
+                Some(duration),
+            ))
+            .unwrap()
+            .expect("matched sample song");
+            let timed = row
+                .synced_lyrics
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty());
+            println!("{title}: timed={timed}; cover={}", row.cover.is_some());
+            assert!(timed, "sample must have timed lyrics");
+            if title == "人来人往" {
+                assert!(row.cover.is_some(), "catalog cover fallback");
+            }
+        }
+    }
     #[test]
     fn simplified_traditional_and_recording_confidence() {
         assert_eq!(
